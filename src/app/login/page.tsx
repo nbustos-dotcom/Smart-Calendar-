@@ -11,9 +11,26 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
+// These are read at BUILD time and frozen into the page. If a value is blank
+// here, it means the deployment that built this page didn't have that env var
+// set. We surface that plainly instead of firing a broken request to Supabase
+// (which returns a confusing "No API key found" error).
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+
+function missingConfig(): string[] {
+  const missing: string[] = [];
+  if (!SUPABASE_URL) missing.push("NEXT_PUBLIC_SUPABASE_URL");
+  if (!SUPABASE_ANON_KEY) missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  return missing;
+}
+
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const missing = missingConfig();
+  const configOk = missing.length === 0;
 
   async function signInWithGoogle() {
     setLoading(true);
@@ -49,9 +66,40 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <Button onClick={signInWithGoogle} disabled={loading}>
+          {/* Configuration check — tells us exactly what this build is missing. */}
+          {!configOk && (
+            <div
+              className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm"
+              role="alert"
+            >
+              <p className="font-medium text-destructive">
+                This deployment is missing configuration:
+              </p>
+              <ul className="mt-1 list-disc pl-5 text-destructive">
+                {missing.map((name) => (
+                  <li key={name}>
+                    <code>{name}</code>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-muted-foreground">
+                Set it in Vercel (scoped to Production), then redeploy.
+              </p>
+            </div>
+          )}
+
+          <Button onClick={signInWithGoogle} disabled={loading || !configOk}>
             {loading ? "Redirecting…" : "Sign in with Google"}
           </Button>
+
+          {/* Non-secret readout so we can confirm what the build baked in. */}
+          <p className="text-xs text-muted-foreground">
+            Config check — URL: {SUPABASE_URL ? "set" : "MISSING"} · anon key:{" "}
+            {SUPABASE_ANON_KEY
+              ? `set (${SUPABASE_ANON_KEY.length} chars)`
+              : "MISSING"}
+          </p>
+
           {error && (
             <p className="text-sm text-destructive" role="alert">
               {error}
