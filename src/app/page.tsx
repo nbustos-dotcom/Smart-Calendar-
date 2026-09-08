@@ -77,8 +77,12 @@ export default async function HomePage() {
     course_name: r.courses?.name ?? null,
   }));
 
+  // Wide container: the calendar should use most of the window on big screens,
+  // with only a comfortable side margin. The high max-width keeps it from
+  // stretching absurdly on ultra-wide displays; padding scales down on small
+  // screens so it stays responsive.
   return (
-    <main className="mx-auto w-full max-w-5xl p-6">
+    <main className="mx-auto w-full max-w-[1800px] px-4 py-6 sm:px-6 lg:px-8">
       <header className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Smart Calendar</h1>
