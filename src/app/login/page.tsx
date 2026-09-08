@@ -41,9 +41,13 @@ export default function LoginPage() {
   const configOk = missing.length === 0;
 
   // If the auth callback bounced us back here with a reason, show it plainly.
+  // This genuinely needs an effect: the ?error param only exists in the browser,
+  // so reading it during render would break the static prerender / cause a
+  // hydration mismatch. We sync it into state once, on mount.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const reason = params.get("error");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (reason) setError(reason);
   }, []);
 
@@ -106,14 +110,6 @@ export default function LoginPage() {
           <Button onClick={signInWithGoogle} disabled={loading || !configOk}>
             {loading ? "Redirecting…" : "Sign in with Google"}
           </Button>
-
-          {/* Non-secret readout so we can confirm what the build baked in. */}
-          <p className="text-xs text-muted-foreground">
-            Config check — URL: {SUPABASE_URL ? "set" : "MISSING"} · anon key:{" "}
-            {SUPABASE_ANON_KEY
-              ? `set (${SUPABASE_ANON_KEY.length} chars)`
-              : "MISSING"}
-          </p>
 
           {error && (
             <p className="text-sm text-destructive" role="alert">

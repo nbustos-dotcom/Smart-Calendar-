@@ -23,6 +23,26 @@ type Mode = "week" | "month";
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+// --- Week time-grid sizing (all display only) --------------------------------
+const HOUR_PX = 44; // vertical pixels per hour row
+const TIME_COL_PX = 56; // width of the left time axis
+const MIN_BLOCK_PX = 22; // smallest a block can render, so its label still fits
+const DEFAULT_EVENT_MIN = 60; // assume 1 hour when an event has no end time
+const DUE_BLOCK_MIN = 30; // a deadline is a moment; show it as a short block
+
+// One positioned block on the week grid (an event or an assignment deadline).
+type GridBlock = {
+  id: string;
+  kind: "event" | "assignment";
+  title: string;
+  href: string | null;
+  subtitle: string;
+  startMin: number; // minutes from midnight
+  endMin: number; // minutes from midnight
+  lane: number; // which sub-column within the day (for overlaps)
+  lanes: number; // how many sub-columns the overlap cluster needs
+};
+
 export function CalendarView({
   assignments,
   events,
@@ -146,7 +166,12 @@ function Legend() {
   );
 }
 
-// --- Week view: 7 day columns, each listing timed items ----------------------
+// --- Week view: a time-grid, like Google Calendar ----------------------------
+//
+// 7 day columns (Mon–Sun) across the full width, hours down the left side, and
+// each event/assignment placed at its real start time and sized to its duration
+// (not stretched to fill the day). Items with no time-of-day — Canvas "all-day"
+// events — go in the all-day strip on top; we never invent a clock time for them.
 
 function WeekView({
   anchor,
@@ -159,44 +184,229 @@ function WeekView({
   assignments: AssignmentItem[];
   events: ClassEventItem[];
 }) {
-  const days = weekDays(anchor);
+  // Monday-first order. The shared weekDays() helper is Sunday-first (and the
+  // month view relies on that), so we reorder locally instead of changing it.
+  const days = mondayFirst(weekDays(anchor));
+
+  // For each day, split items into timed blocks (placed on the grid) and all-day
+  // events (placed in the strip). Assignments always carry a due time, so they
+  // are always timed.
+  const perDay = days.map((day) => {
+    const allDay = events.filter(
+      (e) => e.start_at && isSameDay(new Date(e.start_at), day) && isAllDay(e)
+    );
+
+    const timed: GridBlock[] = [];
+
+    for (const e of events) {
+      if (!e.start_at) continue;
+      const start = new Date(e.start_at);
+      if (!isSameDay(start, day) || isAllDay(e)) continue;
+      const startMin = minutesOfDay(start);
+      const endMin = e.end_at
+        ? Math.max(minutesOfDay(new Date(e.end_at)), startMin + 15)
+        : startMin + DEFAULT_EVENT_MIN;
+      timed.push({
+        id: e.id,
+        kind: "event",
+        title: e.title,
+        href: e.html_url,
+        subtitle: [formatTimeRange(e.start_at, e.end_at), e.location_name]
+          .filter((s): s is string => Boolean(s))
+          .join(" · "),
+        startMin,
+        endMin,
+        lane: 0,
+        lanes: 1,
+      });
+    }
+
+    for (const a of assignments) {
+      if (!a.due_at) continue;
+      const due = new Date(a.due_at);
+      if (!isSameDay(due, day)) continue;
+      const startMin = minutesOfDay(due);
+      timed.push({
+        id: a.id,
+        kind: "assignment",
+        title: a.title,
+        href: a.html_url,
+        subtitle: `Due ${formatTime(a.due_at)}${
+          a.points_possible != null ? ` · ${a.points_possible} pts` : ""
+        }`,
+        startMin,
+        endMin: startMin + DUE_BLOCK_MIN,
+        lane: 0,
+        lanes: 1,
+      });
+    }
+
+    return { day, allDay, timed: layoutDay(timed) };
+  });
+
+  // One shared hour range for the whole week so every column lines up.
+  const { minHour, maxHour } = hourRange(perDay.flatMap((d) => d.timed));
+  const totalHeight = (maxHour - minHour) * HOUR_PX;
+  const hours = Array.from({ length: maxHour - minHour }, (_, i) => minHour + i);
+  const hasAllDay = perDay.some((d) => d.allDay.length > 0);
+  const gridCols = `${TIME_COL_PX}px repeat(7, minmax(0, 1fr))`;
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-7">
-      {days.map((day) => {
-        const dayEvents = events
-          .filter((e) => e.start_at && isSameDay(new Date(e.start_at), day))
-          .sort(byTime((e) => e.start_at));
-        const dayAssignments = assignments
-          .filter((a) => a.due_at && isSameDay(new Date(a.due_at), day))
-          .sort(byTime((a) => a.due_at));
-        const isToday = isSameDay(day, today);
+    <div className="overflow-x-auto">
+      <div className="min-w-[760px] rounded-lg border">
+        {/* Day headers */}
+        <div className="grid border-b" style={{ gridTemplateColumns: gridCols }}>
+          <div className="border-r" />
+          {days.map((day) => {
+            const isToday = isSameDay(day, today);
+            return (
+              <div
+                key={day.toISOString()}
+                className={cn(
+                  "border-r px-2 py-1.5 text-center last:border-r-0",
+                  isToday && "bg-primary/5"
+                )}
+              >
+                <div className="text-xs text-muted-foreground">
+                  {WEEKDAY_LABELS[day.getDay()]}
+                </div>
+                <div
+                  className={cn(
+                    "text-sm font-medium",
+                    isToday && "text-primary"
+                  )}
+                >
+                  {day.getDate()}
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
-        return (
+        {/* All-day strip — only shown when there are all-day events */}
+        {hasAllDay && (
           <div
-            key={day.toISOString()}
-            className={cn(
-              "rounded-lg border p-2",
-              isToday && "border-primary ring-1 ring-primary"
-            )}
+            className="grid border-b"
+            style={{ gridTemplateColumns: gridCols }}
           >
-            <div className="mb-2 text-xs font-medium">
-              {WEEKDAY_LABELS[day.getDay()]} {day.getDate()}
+            <div className="border-r px-1 py-1 text-right text-[10px] text-muted-foreground">
+              all-day
             </div>
-            <div className="flex flex-col gap-1.5">
-              {dayEvents.length === 0 && dayAssignments.length === 0 && (
-                <span className="text-xs text-muted-foreground">—</span>
-              )}
-              {dayEvents.map((e) => (
-                <EventChip key={e.id} event={e} />
-              ))}
-              {dayAssignments.map((a) => (
-                <AssignmentChip key={a.id} assignment={a} />
-              ))}
-            </div>
+            {perDay.map(({ day, allDay }) => (
+              <div
+                key={day.toISOString()}
+                className="border-r p-1 last:border-r-0"
+              >
+                <div className="flex flex-col gap-1">
+                  {allDay.map((e) => (
+                    <div
+                      key={e.id}
+                      className="truncate rounded border-l-2 border-blue-500 bg-blue-500/10 px-1 py-0.5 text-[11px]"
+                      title={e.title}
+                    >
+                      <ItemLink href={e.html_url}>{e.title}</ItemLink>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
-        );
-      })}
+        )}
+
+        {/* Scrollable time grid */}
+        <div className="max-h-[65vh] overflow-y-auto">
+          <div className="grid" style={{ gridTemplateColumns: gridCols }}>
+            {/* Left time axis */}
+            <div className="relative border-r" style={{ height: totalHeight }}>
+              {hours.map((h) => (
+                <div
+                  key={h}
+                  className="absolute right-1 -translate-y-1/2 text-[10px] text-muted-foreground"
+                  style={{ top: (h - minHour) * HOUR_PX }}
+                >
+                  {formatHour(h)}
+                </div>
+              ))}
+            </div>
+
+            {/* Day columns */}
+            {perDay.map(({ day, timed }) => {
+              const isToday = isSameDay(day, today);
+              return (
+                <div
+                  key={day.toISOString()}
+                  className={cn(
+                    "relative border-r last:border-r-0",
+                    isToday && "bg-primary/5"
+                  )}
+                  style={{
+                    height: totalHeight,
+                    // Faint horizontal line at the bottom of every hour.
+                    backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${
+                      HOUR_PX - 1
+                    }px, var(--border) ${HOUR_PX - 1}px, var(--border) ${HOUR_PX}px)`,
+                  }}
+                >
+                  {isToday && <NowLine minHour={minHour} maxHour={maxHour} />}
+                  {timed.map((b) => {
+                    const top = ((b.startMin - minHour * 60) / 60) * HOUR_PX;
+                    const rawHeight = ((b.endMin - b.startMin) / 60) * HOUR_PX;
+                    const height = Math.max(
+                      MIN_BLOCK_PX,
+                      Math.min(rawHeight, totalHeight - top)
+                    );
+                    const widthPct = 100 / b.lanes;
+                    const leftPct = b.lane * widthPct;
+                    return (
+                      <div
+                        key={b.id}
+                        className={cn(
+                          "absolute overflow-hidden rounded-md border-l-2 px-1.5 py-0.5 text-[11px] leading-tight",
+                          b.kind === "event"
+                            ? "border-blue-500 bg-blue-500/10 text-blue-900 dark:text-blue-100"
+                            : "border-amber-500 bg-amber-500/10 text-amber-900 dark:text-amber-100"
+                        )}
+                        style={{
+                          top,
+                          height,
+                          left: `calc(${leftPct}% + 2px)`,
+                          width: `calc(${widthPct}% - 4px)`,
+                        }}
+                        title={`${b.title} — ${b.subtitle}`}
+                      >
+                        <div className="truncate font-medium">
+                          <ItemLink href={b.href}>{b.title}</ItemLink>
+                        </div>
+                        {height > 32 && (
+                          <div className="truncate text-muted-foreground">
+                            {b.subtitle}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// A thin red line marking the current time on today's column (like Google
+// Calendar). Hidden when "now" is outside the visible hour range.
+function NowLine({ minHour, maxHour }: { minHour: number; maxHour: number }) {
+  const nowMin = minutesOfDay(new Date());
+  if (nowMin < minHour * 60 || nowMin > maxHour * 60) return null;
+  const top = ((nowMin - minHour * 60) / 60) * HOUR_PX;
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 z-10 border-t border-red-500"
+      style={{ top }}
+    >
+      <div className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-red-500" />
     </div>
   );
 }
@@ -282,36 +492,6 @@ function MonthView({
 
 // --- Small pieces ------------------------------------------------------------
 
-function EventChip({ event }: { event: ClassEventItem }) {
-  return (
-    <div className="rounded-md border-l-2 border-blue-500 bg-blue-500/5 px-2 py-1 text-xs">
-      <div className="font-medium">
-        <ItemLink href={event.html_url}>{event.title}</ItemLink>
-      </div>
-      <div className="text-muted-foreground">
-        {formatTimeRange(event.start_at, event.end_at)}
-        {event.location_name ? ` · ${event.location_name}` : ""}
-      </div>
-    </div>
-  );
-}
-
-function AssignmentChip({ assignment }: { assignment: AssignmentItem }) {
-  return (
-    <div className="rounded-md border-l-2 border-amber-500 bg-amber-500/5 px-2 py-1 text-xs">
-      <div className="font-medium">
-        <ItemLink href={assignment.html_url}>{assignment.title}</ItemLink>
-      </div>
-      <div className="text-muted-foreground">
-        Due {formatTime(assignment.due_at)}
-        {assignment.points_possible != null
-          ? ` · ${assignment.points_possible} pts`
-          : ""}
-      </div>
-    </div>
-  );
-}
-
 function MiniChip({
   color,
   label,
@@ -370,13 +550,88 @@ function formatTimeRange(start: string | null, end: string | null): string {
   return end ? `${startStr}–${formatTime(end)}` : startStr;
 }
 
-// Sort helper: order items by the time of the given ISO field (nulls last).
-function byTime<T>(get: (item: T) => string | null) {
-  return (a: T, b: T) => {
-    const av = get(a);
-    const bv = get(b);
-    if (!av) return 1;
-    if (!bv) return -1;
-    return new Date(av).getTime() - new Date(bv).getTime();
+// --- week time-grid helpers (pure) -------------------------------------------
+
+// weekDays() returns Sunday..Saturday; rotate so Monday leads and Sunday trails.
+function mondayFirst(days: Date[]): Date[] {
+  return [...days.slice(1), days[0]];
+}
+
+// Minutes since midnight for a local Date (e.g. 9:30am -> 570).
+function minutesOfDay(d: Date): number {
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+// A Canvas "all-day" event has no meaningful clock time. We don't store an
+// explicit all-day flag, so we treat an event as all-day when it starts exactly
+// at midnight and either has no end or also ends at midnight. Those go in the
+// all-day strip instead of being pinned to 12:00 AM on the grid.
+function isAllDay(e: ClassEventItem): boolean {
+  if (!e.start_at) return false;
+  if (minutesOfDay(new Date(e.start_at)) !== 0) return false;
+  if (!e.end_at) return true;
+  return minutesOfDay(new Date(e.end_at)) === 0;
+}
+
+// Pick the hour range the grid should show, from the actual items (so we don't
+// render a wall of empty early-morning hours). Falls back to a daytime default.
+function hourRange(blocks: GridBlock[]): { minHour: number; maxHour: number } {
+  if (blocks.length === 0) return { minHour: 8, maxHour: 20 };
+  let min = 24 * 60;
+  let max = 0;
+  for (const b of blocks) {
+    min = Math.min(min, b.startMin);
+    max = Math.max(max, b.endMin);
+  }
+  const minHour = Math.max(0, Math.floor(min / 60));
+  const maxHour = Math.min(24, Math.max(minHour + 1, Math.ceil(max / 60)));
+  return { minHour, maxHour };
+}
+
+// Assign overlapping blocks to side-by-side lanes so they don't cover each other
+// (the same idea Google Calendar uses). Non-overlapping blocks all share lane 0
+// and take the full column width.
+function layoutDay(blocks: GridBlock[]): GridBlock[] {
+  const sorted = [...blocks].sort(
+    (a, b) => a.startMin - b.startMin || a.endMin - b.endMin
+  );
+  const out: GridBlock[] = [];
+  let cluster: GridBlock[] = [];
+  let clusterEnd = -1;
+
+  const flush = () => {
+    const laneEnds: number[] = []; // last endMin currently occupying each lane
+    for (const b of cluster) {
+      let lane = laneEnds.findIndex((end) => end <= b.startMin);
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(b.endMin);
+      } else {
+        laneEnds[lane] = b.endMin;
+      }
+      b.lane = lane;
+    }
+    for (const b of cluster) {
+      b.lanes = laneEnds.length;
+      out.push(b);
+    }
+    cluster = [];
+    clusterEnd = -1;
   };
+
+  for (const b of sorted) {
+    // A gap with everything so far ends the current overlap cluster.
+    if (cluster.length > 0 && b.startMin >= clusterEnd) flush();
+    cluster.push(b);
+    clusterEnd = Math.max(clusterEnd, b.endMin);
+  }
+  flush();
+  return out;
+}
+
+// "8 AM", "12 PM", "11 PM" for an hour number 0..23.
+function formatHour(h: number): string {
+  const period = h < 12 ? "AM" : "PM";
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12} ${period}`;
 }
