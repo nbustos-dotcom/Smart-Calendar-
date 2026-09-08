@@ -1,3 +1,10 @@
+// ============================================================================
+// CANVAS API CLIENT (read-only)
+//
+// The ONLY place that talks to Canvas. Every function here makes a GET request —
+// there is deliberately no write/post helper, so the app can never change
+// anything in Canvas. It also follows Canvas's pagination automatically.
+// ============================================================================
 import "server-only";
 import { parseNextLink } from "./canvas-parse";
 

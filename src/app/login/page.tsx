@@ -1,5 +1,13 @@
 "use client";
 
+// ============================================================================
+// LOGIN PAGE — the sign-in screen (URL: "/login")
+//
+// Shows the "Sign in with Google" button. It also checks that this deployment
+// actually has its Supabase settings, and shows any sign-in error plainly,
+// instead of failing silently.
+// ============================================================================
+
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";

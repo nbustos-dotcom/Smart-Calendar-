@@ -1,3 +1,10 @@
+// ============================================================================
+// SUPABASE SESSION REFRESH — helper used by src/proxy.ts on every request
+//
+// Keeps the login session fresh and redirects signed-out users to /login.
+// (Renamed from "middleware.ts" so it isn't confused with Next's proxy file,
+// which is src/proxy.ts. This is a plain helper, not a framework entry point.)
+// ============================================================================
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 

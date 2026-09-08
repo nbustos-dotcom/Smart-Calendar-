@@ -1,3 +1,7 @@
+// ----------------------------------------------------------------------------
+// SHADCN/UI COMPONENT (Card) — a standard UI building block from shadcn/ui.
+// Library boilerplate; you normally won't edit this. Docs: https://ui.shadcn.com
+// ----------------------------------------------------------------------------
 import * as React from "react";
 
 import { cn } from "@/lib/utils";

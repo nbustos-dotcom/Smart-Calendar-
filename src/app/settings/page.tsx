@@ -1,3 +1,9 @@
+// ============================================================================
+// SETTINGS PAGE — "Connect Canvas" (URL: "/settings")
+//
+// Where the student pastes their Canvas token and runs a sync. This file just
+// reads the current connection status and renders <SettingsForm>.
+// ============================================================================
 import Link from "next/link";
 import { getConnectionStatus } from "@/lib/canvas-connection";
 import { SettingsForm } from "@/components/settings-form";

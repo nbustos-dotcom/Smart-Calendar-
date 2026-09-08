@@ -1,5 +1,13 @@
 "use server";
 
+// ============================================================================
+// SETTINGS SERVER ACTIONS — the buttons on the Settings page call these
+//
+// These functions run on the SERVER only (that's what "use server" means): save
+// and verify the Canvas token, sync now, and remove the token. Running on the
+// server keeps the token and encryption away from the browser.
+// ============================================================================
+
 import { revalidatePath } from "next/cache";
 import {
   saveToken,

@@ -1,3 +1,10 @@
+// ============================================================================
+// CALENDAR DATE HELPERS — the week/month grid math
+//
+// Pure date-in / date-out functions used by the calendar UI. Kept separate and
+// unit-tested (see tests/calendar.test.ts) so the calendar component stays simple.
+// ============================================================================
+
 // Pure date helpers for building calendar grids. No React, no data fetching —
 // just dates in, dates out — so they are easy to read and to unit-test.
 //

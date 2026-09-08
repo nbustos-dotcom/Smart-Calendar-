@@ -1,3 +1,5 @@
+// Test runner config (used by `npm test`): makes "@/..." imports work in tests
+// and stubs out "server-only" so server files can be unit-tested.
 import { defineConfig } from "vitest/config";
 import path from "node:path";
 

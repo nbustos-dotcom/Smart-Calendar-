@@ -1,3 +1,10 @@
+// ============================================================================
+// TOKEN ENCRYPTION (server-only)
+//
+// Encrypts/decrypts the Canvas token with AES-256-GCM before it is stored in the
+// database, using APP_ENCRYPTION_KEY from the environment. Neither the key nor
+// the decrypted token ever reaches the browser.
+// ============================================================================
 import "server-only";
 import crypto from "node:crypto";
 

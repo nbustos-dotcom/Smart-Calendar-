@@ -1,3 +1,10 @@
+// ============================================================================
+// CANVAS SYNC — pull the student's Canvas data into our database
+//
+// Read-only against Canvas; everything it writes is the current user's own rows
+// (the database's per-user rules enforce that). It records an honest ok/error
+// status so the UI can show exactly what happened.
+// ============================================================================
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import {

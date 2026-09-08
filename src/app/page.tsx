@@ -1,3 +1,10 @@
+// ============================================================================
+// DASHBOARD / CALENDAR PAGE — the app's home screen (URL: "/")
+//
+// What the student sees after signing in. It loads their synced assignments and
+// class events from the database and hands them to <CalendarView> to draw the
+// week/month calendar. Display only — no scheduling happens here.
+// ============================================================================
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getConnectionStatus } from "@/lib/canvas-connection";

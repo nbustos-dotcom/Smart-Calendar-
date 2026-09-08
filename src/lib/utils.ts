@@ -1,3 +1,7 @@
+// ----------------------------------------------------------------------------
+// cn() — the shadcn/ui helper for combining Tailwind class names. Library
+// boilerplate used throughout the UI components. You normally won't edit this.
+// ----------------------------------------------------------------------------
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 

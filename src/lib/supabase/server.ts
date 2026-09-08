@@ -1,3 +1,9 @@
+// ============================================================================
+// SUPABASE CLIENT (server) — used by Server Components, routes, and actions
+//
+// Reads the signed-in user's session from cookies, so every query runs AS that
+// user and the database's per-user rules keep them to their own rows.
+// ============================================================================
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 

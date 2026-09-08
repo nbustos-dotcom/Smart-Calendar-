@@ -1,3 +1,8 @@
+-- ############################################################################
+-- DATABASE SETUP — run this ONCE in the Supabase SQL Editor
+-- Creates the 5 tables and the per-user security rules the whole app relies on.
+-- ############################################################################
+
 -- Smart Calendar — initial schema (Phase 1)
 --
 -- Design notes:

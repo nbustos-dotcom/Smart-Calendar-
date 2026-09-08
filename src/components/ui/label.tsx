@@ -1,5 +1,10 @@
 "use client";
 
+// ----------------------------------------------------------------------------
+// SHADCN/UI COMPONENT (Label) — a standard UI building block from shadcn/ui.
+// Library boilerplate; you normally won't edit this. Docs: https://ui.shadcn.com
+// ----------------------------------------------------------------------------
+
 import * as React from "react";
 import * as LabelPrimitive from "@radix-ui/react-label";
 

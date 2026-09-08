@@ -1,3 +1,11 @@
+// ============================================================================
+// CANVAS PARSING HELPERS — turn raw Canvas JSON into our tidy row shapes
+//
+// Pure functions (no network, no database), which makes them easy to unit-test
+// (see tests/canvas-parse.test.ts). They never invent data: a missing due date
+// stays null rather than being guessed.
+// ============================================================================
+
 // Pure helpers for reading Canvas API responses.
 //
 // These have NO network and NO database code, on purpose: they are the parts

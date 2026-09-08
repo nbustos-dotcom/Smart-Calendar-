@@ -1,3 +1,9 @@
+// ============================================================================
+// ROOT LAYOUT — the HTML shell wrapped around EVERY page
+//
+// Sets up the fonts and the <html>/<body> tags. Every page in src/app renders
+// inside this. You rarely edit it except to change something site-wide.
+// ============================================================================
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";

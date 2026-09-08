@@ -1,3 +1,10 @@
+// ============================================================================
+// GOOGLE SIGN-IN CALLBACK (URL: "/auth/callback")
+//
+// Google sends the user back here after they approve sign-in. We trade the
+// one-time code for a real session (stored in cookies), then send them into the
+// app. If it fails, we pass the real reason back to the login page.
+// ============================================================================
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 

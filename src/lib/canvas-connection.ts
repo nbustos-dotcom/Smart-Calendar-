@@ -1,3 +1,9 @@
+// ============================================================================
+// CANVAS CONNECTION — store and read the (encrypted) Canvas token
+//
+// Saves/reads/clears the current user's Canvas token, and hands the DECRYPTED
+// credentials to the sync. Server-only; the token never reaches the browser.
+// ============================================================================
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { encrypt, decrypt } from "@/lib/crypto";

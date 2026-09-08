@@ -1,3 +1,7 @@
+// ============================================================================
+// SHARED TYPES — the data shapes the calendar UI works with
+// ============================================================================
+
 // Plain shapes the calendar UI works with. These mirror what we store, trimmed
 // to what the screen actually needs.
 

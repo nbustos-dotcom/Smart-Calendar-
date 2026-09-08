@@ -1,3 +1,8 @@
+// ============================================================================
+// SIGN-OUT ROUTE (URL: "/auth/signout")
+//
+// Ends the user's session and sends them back to the login page.
+// ============================================================================
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 

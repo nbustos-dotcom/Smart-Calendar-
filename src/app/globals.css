@@ -1,3 +1,8 @@
+/* ==========================================================================
+   GLOBAL STYLES + THEME
+   Loads Tailwind and defines the shadcn/ui color theme (light + dark mode).
+   This file styles the whole app; individual components use Tailwind classes.
+   ========================================================================== */
 @import "tailwindcss";
 @import "tw-animate-css";
 

@@ -1,5 +1,13 @@
 "use client";
 
+// ============================================================================
+// SETTINGS FORM — the token box + Sync/Remove buttons on the Settings page
+//
+// The interactive (browser) part of Settings. It calls the server actions in
+// src/app/settings/actions.ts and shows their result messages. It never sees
+// the saved token.
+// ============================================================================
+
 import { useState, useTransition } from "react";
 import {
   saveTokenAction,

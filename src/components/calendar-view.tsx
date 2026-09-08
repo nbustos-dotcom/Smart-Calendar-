@@ -1,5 +1,13 @@
 "use client";
 
+// ============================================================================
+// CALENDAR VIEW — the week/month calendar grid (display only)
+//
+// Takes the assignments + class events passed in from the dashboard and lays
+// them out on a Week or Month calendar. Pure display: it never fetches data and
+// never schedules anything. The date math lives in src/lib/calendar.ts.
+// ============================================================================
+
 import { useMemo, useState } from "react";
 import {
   addDays,
