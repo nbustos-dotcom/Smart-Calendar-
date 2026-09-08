@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +31,13 @@ export default function LoginPage() {
 
   const missing = missingConfig();
   const configOk = missing.length === 0;
+
+  // If the auth callback bounced us back here with a reason, show it plainly.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const reason = params.get("error");
+    if (reason) setError(reason);
+  }, []);
 
   async function signInWithGoogle() {
     setLoading(true);

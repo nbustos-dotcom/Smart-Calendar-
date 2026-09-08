@@ -8,14 +8,26 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/";
 
+  // Google can also send back an error (e.g. access_denied) instead of a code.
+  const providerError =
+    searchParams.get("error_description") ?? searchParams.get("error");
+
   if (code) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
     }
+    // Pass the REAL reason back so the login page can show it, instead of a
+    // vague "it failed". This is what turns a dead end into something fixable.
+    return NextResponse.redirect(
+      `${origin}/login?error=${encodeURIComponent(error.message)}`
+    );
   }
 
-  // If the exchange failed, be honest about it rather than looping silently.
-  return NextResponse.redirect(`${origin}/login?error=sign-in-failed`);
+  return NextResponse.redirect(
+    `${origin}/login?error=${encodeURIComponent(
+      providerError ?? "No sign-in code was returned."
+    )}`
+  );
 }
