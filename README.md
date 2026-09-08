@@ -25,7 +25,7 @@ Next.js server (App Router, on Vercel)
    └── Supabase Postgres (Row Level Security: each user sees only their rows)
 ```
 
-Where things live in the code (plain names on purpose):
+Where things live in the code:
 
 | Path | What it does |
 |---|---|
