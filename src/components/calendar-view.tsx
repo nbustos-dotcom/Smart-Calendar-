@@ -24,11 +24,13 @@ type Mode = "week" | "month";
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // --- Week time-grid sizing (all display only) --------------------------------
-const HOUR_PX = 44; // vertical pixels per hour row
-const TIME_COL_PX = 56; // width of the left time axis
-const MIN_BLOCK_PX = 22; // smallest a block can render, so its label still fits
+const HOUR_PX = 48; // vertical pixels per hour row
+const TIME_COL_PX = 60; // width of the left time axis
+const GRID_PAD_TOP = 10; // top padding so the first hour label isn't clipped
+const MIN_BLOCK_PX = 26; // smallest a block can render, so its label still fits
 const DEFAULT_EVENT_MIN = 60; // assume 1 hour when an event has no end time
 const DUE_BLOCK_MIN = 30; // a deadline is a moment; show it as a short block
+const MAX_SIDE_BY_SIDE = 2; // beyond this many overlapping items, collapse them
 
 // One positioned block on the week grid (an event or an assignment deadline).
 type GridBlock = {
@@ -39,8 +41,13 @@ type GridBlock = {
   subtitle: string;
   startMin: number; // minutes from midnight
   endMin: number; // minutes from midnight
-  lane: number; // which sub-column within the day (for overlaps)
-  lanes: number; // how many sub-columns the overlap cluster needs
+};
+
+// A set of blocks that overlap in time and must share a day column's width.
+type Cluster = {
+  key: string;
+  startMin: number;
+  items: GridBlock[];
 };
 
 export function CalendarView({
@@ -184,6 +191,9 @@ function WeekView({
   assignments: AssignmentItem[];
   events: ClassEventItem[];
 }) {
+  // Which collapsed overlap-cluster (if any) is currently expanded.
+  const [openCluster, setOpenCluster] = useState<string | null>(null);
+
   // Monday-first order. The shared weekDays() helper is Sunday-first (and the
   // month view relies on that), so we reorder locally instead of changing it.
   const days = mondayFirst(weekDays(anchor));
@@ -216,8 +226,6 @@ function WeekView({
           .join(" · "),
         startMin,
         endMin,
-        lane: 0,
-        lanes: 1,
       });
     }
 
@@ -236,12 +244,10 @@ function WeekView({
         }`,
         startMin,
         endMin: startMin + DUE_BLOCK_MIN,
-        lane: 0,
-        lanes: 1,
       });
     }
 
-    return { day, allDay, timed: layoutDay(timed) };
+    return { day, allDay, timed };
   });
 
   // One shared hour range for the whole week so every column lines up.
@@ -251,78 +257,94 @@ function WeekView({
   const hasAllDay = perDay.some((d) => d.allDay.length > 0);
   const gridCols = `${TIME_COL_PX}px repeat(7, minmax(0, 1fr))`;
 
-  return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[760px] rounded-lg border">
-        {/* Day headers */}
-        <div className="grid border-b" style={{ gridTemplateColumns: gridCols }}>
-          <div className="border-r" />
-          {days.map((day) => {
-            const isToday = isSameDay(day, today);
-            return (
-              <div
-                key={day.toISOString()}
-                className={cn(
-                  "border-r px-2 py-1.5 text-center last:border-r-0",
-                  isToday && "bg-primary/5"
-                )}
-              >
-                <div className="text-xs text-muted-foreground">
-                  {WEEKDAY_LABELS[day.getDay()]}
-                </div>
-                <div
-                  className={cn(
-                    "text-sm font-medium",
-                    isToday && "text-primary"
-                  )}
-                >
-                  {day.getDate()}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+  // Convert minutes-from-midnight into a vertical pixel offset on the grid.
+  const yFor = (min: number) => ((min - minHour * 60) / 60) * HOUR_PX;
 
-        {/* All-day strip — only shown when there are all-day events */}
-        {hasAllDay && (
+  return (
+    <div className="w-full overflow-x-auto">
+      <div className="w-full min-w-[720px] overflow-hidden rounded-lg border">
+        {/* One vertical scroll container holds BOTH the header and the grid, so
+            the scrollbar narrows them by the same amount and the columns stay
+            perfectly aligned. The header is sticky so it stays in view. */}
+        <div className="max-h-[72vh] overflow-y-auto">
+          {/* Day headers (sticky) */}
           <div
-            className="grid border-b"
+            className="sticky top-0 z-20 grid border-b bg-background"
             style={{ gridTemplateColumns: gridCols }}
           >
-            <div className="border-r px-1 py-1 text-right text-[10px] text-muted-foreground">
-              all-day
-            </div>
-            {perDay.map(({ day, allDay }) => (
-              <div
-                key={day.toISOString()}
-                className="border-r p-1 last:border-r-0"
-              >
-                <div className="flex flex-col gap-1">
-                  {allDay.map((e) => (
-                    <div
-                      key={e.id}
-                      className="truncate rounded border-l-2 border-blue-500 bg-blue-500/10 px-1 py-0.5 text-[11px]"
-                      title={e.title}
-                    >
-                      <ItemLink href={e.html_url}>{e.title}</ItemLink>
-                    </div>
-                  ))}
+            <div className="border-r" />
+            {days.map((day) => {
+              const isToday = isSameDay(day, today);
+              return (
+                <div
+                  key={day.toISOString()}
+                  className={cn(
+                    "border-r px-2 py-1.5 text-center last:border-r-0",
+                    isToday && "bg-primary/5"
+                  )}
+                >
+                  <div className="text-xs text-muted-foreground">
+                    {WEEKDAY_LABELS[day.getDay()]}
+                  </div>
+                  <div
+                    className={cn(
+                      "text-sm font-medium",
+                      isToday && "text-primary"
+                    )}
+                  >
+                    {day.getDate()}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
-        )}
 
-        {/* Scrollable time grid */}
-        <div className="max-h-[65vh] overflow-y-auto">
-          <div className="grid" style={{ gridTemplateColumns: gridCols }}>
-            {/* Left time axis */}
+          {/* All-day strip — only shown when there are all-day events */}
+          {hasAllDay && (
+            <div
+              className="grid border-b"
+              style={{ gridTemplateColumns: gridCols }}
+            >
+              <div className="flex items-center justify-end border-r px-1 py-1 text-[10px] text-muted-foreground">
+                all-day
+              </div>
+              {perDay.map(({ day, allDay }) => (
+                <div
+                  key={day.toISOString()}
+                  className="border-r p-1 last:border-r-0"
+                >
+                  <div className="flex flex-col gap-1">
+                    {allDay.map((e) => (
+                      <div
+                        key={e.id}
+                        className="truncate rounded border-l-2 border-blue-500 bg-blue-500/10 px-1 py-0.5 text-[11px]"
+                        title={e.title}
+                      >
+                        <ItemLink href={e.html_url}>{e.title}</ItemLink>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Time grid */}
+          <div
+            className="grid"
+            style={{
+              gridTemplateColumns: gridCols,
+              paddingTop: GRID_PAD_TOP,
+            }}
+          >
+            {/* Left time axis — labels centered on each hour line. The grid's
+                top padding keeps the first label from being clipped. */}
             <div className="relative border-r" style={{ height: totalHeight }}>
               {hours.map((h) => (
                 <div
                   key={h}
-                  className="absolute right-1 -translate-y-1/2 text-[10px] text-muted-foreground"
-                  style={{ top: (h - minHour) * HOUR_PX }}
+                  className="absolute right-2 -translate-y-1/2 text-[10px] tabular-nums text-muted-foreground"
+                  style={{ top: yFor(h * 60) }}
                 >
                   {formatHour(h)}
                 </div>
@@ -332,6 +354,7 @@ function WeekView({
             {/* Day columns */}
             {perDay.map(({ day, timed }) => {
               const isToday = isSameDay(day, today);
+              const clusters = clusterOverlaps(timed);
               return (
                 <div
                   key={day.toISOString()}
@@ -341,49 +364,72 @@ function WeekView({
                   )}
                   style={{
                     height: totalHeight,
-                    // Faint horizontal line at the bottom of every hour.
-                    backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${
-                      HOUR_PX - 1
-                    }px, var(--border) ${HOUR_PX - 1}px, var(--border) ${HOUR_PX}px)`,
+                    // Faint horizontal line at the top of every hour, aligned
+                    // with the hour labels on the axis.
+                    backgroundImage: `repeating-linear-gradient(to bottom, var(--border) 0, var(--border) 1px, transparent 1px, transparent ${HOUR_PX}px)`,
                   }}
                 >
                   {isToday && <NowLine minHour={minHour} maxHour={maxHour} />}
-                  {timed.map((b) => {
-                    const top = ((b.startMin - minHour * 60) / 60) * HOUR_PX;
-                    const rawHeight = ((b.endMin - b.startMin) / 60) * HOUR_PX;
-                    const height = Math.max(
-                      MIN_BLOCK_PX,
-                      Math.min(rawHeight, totalHeight - top)
-                    );
-                    const widthPct = 100 / b.lanes;
-                    const leftPct = b.lane * widthPct;
-                    return (
-                      <div
-                        key={b.id}
-                        className={cn(
-                          "absolute overflow-hidden rounded-md border-l-2 px-1.5 py-0.5 text-[11px] leading-tight",
-                          b.kind === "event"
-                            ? "border-blue-500 bg-blue-500/10 text-blue-900 dark:text-blue-100"
-                            : "border-amber-500 bg-amber-500/10 text-amber-900 dark:text-amber-100"
-                        )}
-                        style={{
-                          top,
-                          height,
-                          left: `calc(${leftPct}% + 2px)`,
-                          width: `calc(${widthPct}% - 4px)`,
-                        }}
-                        title={`${b.title} — ${b.subtitle}`}
-                      >
-                        <div className="truncate font-medium">
-                          <ItemLink href={b.href}>{b.title}</ItemLink>
-                        </div>
-                        {height > 32 && (
-                          <div className="truncate text-muted-foreground">
-                            {b.subtitle}
+
+                  {clusters.map((cluster) => {
+                    const clusterKey = `${day.toISOString()}::${cluster.key}`;
+                    const top = yFor(cluster.startMin);
+
+                    // 3+ overlapping items would be unreadable slivers, so we
+                    // collapse them into one block that expands on click.
+                    if (cluster.items.length > MAX_SIDE_BY_SIDE) {
+                      return (
+                        <CollapsedCluster
+                          key={clusterKey}
+                          top={top}
+                          totalHeight={totalHeight}
+                          items={cluster.items}
+                          open={openCluster === clusterKey}
+                          onToggle={() =>
+                            setOpenCluster((k) =>
+                              k === clusterKey ? null : clusterKey
+                            )
+                          }
+                        />
+                      );
+                    }
+
+                    // 1 or 2 items: place them side by side, each readable.
+                    const lanes = cluster.items.length;
+                    return cluster.items.map((b, lane) => {
+                      const height = Math.max(
+                        MIN_BLOCK_PX,
+                        Math.min(yFor(b.endMin) - top, totalHeight - top)
+                      );
+                      const widthPct = 100 / lanes;
+                      return (
+                        <div
+                          key={b.id}
+                          className={cn(
+                            "absolute overflow-hidden rounded-md border-l-2 px-1.5 py-0.5 text-[11px] leading-tight",
+                            b.kind === "event"
+                              ? "border-blue-500 bg-blue-500/10 text-blue-900 dark:text-blue-100"
+                              : "border-amber-500 bg-amber-500/10 text-amber-900 dark:text-amber-100"
+                          )}
+                          style={{
+                            top: yFor(b.startMin),
+                            height,
+                            left: `calc(${lane * widthPct}% + 2px)`,
+                            width: `calc(${widthPct}% - 4px)`,
+                          }}
+                          title={`${b.title} — ${b.subtitle}`}
+                        >
+                          <div className="truncate font-medium">
+                            <ItemLink href={b.href}>{b.title}</ItemLink>
                           </div>
-                        )}
-                      </div>
-                    );
+                          {height > 34 && (
+                            <div className="truncate text-muted-foreground">
+                              {b.subtitle}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    });
                   })}
                 </div>
               );
@@ -392,6 +438,89 @@ function WeekView({
         </div>
       </div>
     </div>
+  );
+}
+
+// A collapsed stack of 3+ overlapping items. Shows a single readable summary
+// block ("N due · 9:00 AM"); clicking it expands a full-width list so every
+// title is legible instead of crushing them into slivers.
+function CollapsedCluster({
+  top,
+  totalHeight,
+  items,
+  open,
+  onToggle,
+}: {
+  top: number;
+  totalHeight: number;
+  items: GridBlock[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const allAssignments = items.every((b) => b.kind === "assignment");
+  const startLabel = formatMinutes(items[0].startMin);
+  const height = Math.max(MIN_BLOCK_PX, Math.min(HOUR_PX, totalHeight - top));
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          "absolute left-0.5 right-0.5 flex flex-col justify-center overflow-hidden rounded-md border-l-2 px-1.5 py-0.5 text-left text-[11px] leading-tight",
+          allAssignments
+            ? "border-amber-500 bg-amber-500/15 text-amber-900 dark:text-amber-100"
+            : "border-blue-500 bg-blue-500/15 text-blue-900 dark:text-blue-100"
+        )}
+        style={{ top, height }}
+        title={`${items.length} items at ${startLabel} — click to expand`}
+      >
+        <span className="truncate font-medium">
+          {items.length} {allAssignments ? "due" : "items"} · {startLabel}
+        </span>
+        <span className="truncate text-muted-foreground">
+          {open ? "click to collapse" : "click to expand"}
+        </span>
+      </button>
+
+      {open && (
+        <div
+          className="absolute left-0.5 right-0.5 z-30 max-h-64 overflow-auto rounded-md border bg-popover p-1.5 text-popover-foreground shadow-lg"
+          style={{ top }}
+        >
+          <div className="mb-1 flex items-center justify-between px-0.5">
+            <span className="text-[11px] font-medium">
+              {items.length} at {startLabel}
+            </span>
+            <button
+              type="button"
+              onClick={onToggle}
+              className="text-[11px] text-muted-foreground hover:underline"
+            >
+              close
+            </button>
+          </div>
+          <ul className="flex flex-col gap-1">
+            {items.map((b) => (
+              <li
+                key={b.id}
+                className={cn(
+                  "rounded border-l-2 px-1.5 py-1 text-[11px] leading-tight",
+                  b.kind === "event"
+                    ? "border-blue-500 bg-blue-500/10"
+                    : "border-amber-500 bg-amber-500/10"
+                )}
+              >
+                <div className="font-medium">
+                  <ItemLink href={b.href}>{b.title}</ItemLink>
+                </div>
+                <div className="text-muted-foreground">{b.subtitle}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -588,45 +717,37 @@ function hourRange(blocks: GridBlock[]): { minHour: number; maxHour: number } {
   return { minHour, maxHour };
 }
 
-// Assign overlapping blocks to side-by-side lanes so they don't cover each other
-// (the same idea Google Calendar uses). Non-overlapping blocks all share lane 0
-// and take the full column width.
-function layoutDay(blocks: GridBlock[]): GridBlock[] {
+// Group blocks that overlap in time into clusters. Blocks in a cluster must
+// share the day column's width; separate clusters each get the full width.
+// (The renderer draws small clusters side by side and collapses big ones.)
+function clusterOverlaps(blocks: GridBlock[]): Cluster[] {
   const sorted = [...blocks].sort(
     (a, b) => a.startMin - b.startMin || a.endMin - b.endMin
   );
-  const out: GridBlock[] = [];
-  let cluster: GridBlock[] = [];
-  let clusterEnd = -1;
+  const clusters: Cluster[] = [];
+  let current: GridBlock[] = [];
+  let currentEnd = -1;
 
   const flush = () => {
-    const laneEnds: number[] = []; // last endMin currently occupying each lane
-    for (const b of cluster) {
-      let lane = laneEnds.findIndex((end) => end <= b.startMin);
-      if (lane === -1) {
-        lane = laneEnds.length;
-        laneEnds.push(b.endMin);
-      } else {
-        laneEnds[lane] = b.endMin;
-      }
-      b.lane = lane;
-    }
-    for (const b of cluster) {
-      b.lanes = laneEnds.length;
-      out.push(b);
-    }
-    cluster = [];
-    clusterEnd = -1;
+    if (current.length === 0) return;
+    const startMin = Math.min(...current.map((b) => b.startMin));
+    clusters.push({
+      key: `${startMin}-${currentEnd}-${current.length}`,
+      startMin,
+      items: current,
+    });
+    current = [];
+    currentEnd = -1;
   };
 
   for (const b of sorted) {
     // A gap with everything so far ends the current overlap cluster.
-    if (cluster.length > 0 && b.startMin >= clusterEnd) flush();
-    cluster.push(b);
-    clusterEnd = Math.max(clusterEnd, b.endMin);
+    if (current.length > 0 && b.startMin >= currentEnd) flush();
+    current.push(b);
+    currentEnd = Math.max(currentEnd, b.endMin);
   }
   flush();
-  return out;
+  return clusters;
 }
 
 // "8 AM", "12 PM", "11 PM" for an hour number 0..23.
@@ -634,4 +755,11 @@ function formatHour(h: number): string {
   const period = h < 12 ? "AM" : "PM";
   const hour12 = h % 12 === 0 ? 12 : h % 12;
   return `${hour12} ${period}`;
+}
+
+// "9:00 AM" from minutes-since-midnight (used by the collapsed-cluster label).
+function formatMinutes(min: number): string {
+  const d = new Date();
+  d.setHours(Math.floor(min / 60), min % 60, 0, 0);
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
