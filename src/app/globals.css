@@ -1,17 +1,20 @@
 /* ==========================================================================
    GLOBAL STYLES + THEME
-   Loads Tailwind and defines the shadcn/ui color theme (light + dark mode).
+   Loads Tailwind and defines the shadcn/ui color theme (light + dark + hyper-focus).
    This file styles the whole app; individual components use Tailwind classes.
    ========================================================================== */
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* Dark mode is toggled by a `.dark` class on <html> (standard shadcn setup). */
+/* Dark mode is toggled by a `.dark` class on <html> (standard shadcn setup).
+   Hyper-focus mode is toggled by a `.hyper-focus` class on <html>. */
 @custom-variant dark (&:is(.dark *));
+@custom-variant hyper-focus (&:is(.hyper-focus *));
 
 /*
   Design tokens (shadcn "new-york", neutral base color).
-  Colors are in oklch. Light values live on :root; dark overrides live in .dark.
+  Colors are in oklch. Light values live on :root; dark overrides live in .dark;
+  hyper-focus overrides live in .hyper-focus.
   Tailwind reads them through the @theme mapping below, so you can write
   classes like `bg-background`, `text-muted-foreground`, `border-border`.
 */
@@ -72,13 +75,41 @@
 }
 
 .hyper-focus {
-  --background: oklch(0.15 0 0);
-  --foreground: oklch(0.95 0 0);
-  --card: oklch(0.22 0.08 280);      /* saturated blue/purple */
-  --primary: oklch(0.70 0.20 120);   /* vibrant teal */
-  --accent: oklch(0.65 0.22 40);     /* bold orange/gold */
-  --destructive: oklch(0.65 0.25 15); /* rich red */
-  /* ... etc */
+  /* Dark background with high contrast */
+  --background: oklch(0.12 0 0);
+  --foreground: oklch(0.98 0 0);
+
+  /* Cards: vibrant saturated purple/blue for energy */
+  --card: oklch(0.22 0.10 270);
+  --card-foreground: oklch(0.98 0 0);
+
+  /* Popovers: same energetic surface */
+  --popover: oklch(0.22 0.10 270);
+  --popover-foreground: oklch(0.98 0 0);
+
+  /* Primary: electric cyan/teal for buttons and highlights */
+  --primary: oklch(0.68 0.22 180);
+  --primary-foreground: oklch(0.12 0 0);
+
+  /* Secondary: electric lime for secondary actions */
+  --secondary: oklch(0.75 0.20 120);
+  --secondary-foreground: oklch(0.12 0 0);
+
+  /* Muted: slightly desaturated surface for disabled/secondary content */
+  --muted: oklch(0.28 0.06 280);
+  --muted-foreground: oklch(0.78 0 0);
+
+  /* Accent: vibrant gold/orange for important elements */
+  --accent: oklch(0.72 0.24 45);
+  --accent-foreground: oklch(0.12 0 0);
+
+  /* Destructive: bold hot pink/red for danger states */
+  --destructive: oklch(0.62 0.28 10);
+
+  /* Bright borders and input focus rings */
+  --border: oklch(0.35 0.06 270);
+  --input: oklch(0.30 0.08 280);
+  --ring: oklch(0.68 0.22 180);
 }
 
 @theme inline {
