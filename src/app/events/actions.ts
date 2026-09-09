@@ -45,13 +45,35 @@ export async function createEventAction(
   const { supabase, user } = await requireUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
+  // Build the exact row we send, so we can log it alongside any failure and
+  // compare it column-for-column against the 0002 migration.
+  const insertRow = { ...toEventRow(payload), user_id: user.id };
+
   const { data, error } = await supabase
     .from("user_events")
-    .insert({ ...toEventRow(payload), user_id: user.id })
+    .insert(insertRow)
     .select("id")
     .single();
 
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    // Surface the REAL Postgres/Supabase error to the server console (visible in
+    // `next dev` / Vercel logs), not just the friendly message we return to the
+    // client. PostgrestError carries message/code/details/hint — all useful:
+    //   * code 23502 → a NOT NULL column got null
+    //   * code 42703 → the insert names a column the table doesn't have
+    //   * code 42501 / "row-level security" → RLS rejected the insert
+    //   * code 22P02 → a value didn't match its column type
+    console.error("[createEventAction] insert into user_events failed", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+      userId: user.id,
+      insertRow,
+    });
+    return { ok: false, error: error.message };
+  }
+
   revalidatePath("/");
   return { ok: true, id: data.id };
 }
