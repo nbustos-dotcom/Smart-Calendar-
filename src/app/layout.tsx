@@ -25,9 +25,9 @@ export const metadata: Metadata = {
 };
 
 // Runs before the page paints: applies the saved theme (or the OS preference if
-// none saved) by toggling the `dark` class on <html>, so there's no flash of the
+// none saved) by toggling the `dark` / `hyper-focus` class on <html>, so there's no flash of the
 // wrong theme. Theme is stored per-browser in localStorage — no backend.
-const themeScript = `(function(){try{var t=localStorage.getItem('theme');var dark=t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches);var el=document.documentElement;if(dark)el.classList.add('dark');else el.classList.remove('dark');}catch(e){}})();`;
+const themeScript = `(function(){try{var t=localStorage.getItem('theme');var dark=t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches);var el=document.documentElement;el.classList.remove('dark','hyper-focus');if(t==='dark')el.classList.add('dark');if(t==='hyper-focus')el.classList.add('hyper-focus');}catch(e){}})()`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
