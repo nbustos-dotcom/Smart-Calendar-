@@ -24,32 +24,32 @@ type ColorStyle = {
 const COLOR_STYLES: Record<EventColor, ColorStyle> = {
   blue: {
     block:
-      "border-blue-500 bg-blue-500/20 text-blue-950 dark:bg-blue-500/25 dark:text-blue-50",
+      "border-blue-500 bg-blue-500/20 text-blue-950 dark:bg-blue-500/25 dark:text-blue-50 hyper-focus:bg-blue-500/25 hyper-focus:text-blue-50",
     swatch: "bg-blue-500",
   },
   green: {
     block:
-      "border-green-500 bg-green-500/20 text-green-950 dark:bg-green-500/25 dark:text-green-50",
+      "border-green-500 bg-green-500/20 text-green-950 dark:bg-green-500/25 dark:text-green-50 hyper-focus:bg-green-500/25 hyper-focus:text-green-50",
     swatch: "bg-green-500",
   },
   purple: {
     block:
-      "border-purple-500 bg-purple-500/20 text-purple-950 dark:bg-purple-500/25 dark:text-purple-50",
+      "border-purple-500 bg-purple-500/20 text-purple-950 dark:bg-purple-500/25 dark:text-purple-50 hyper-focus:bg-purple-500/25 hyper-focus:text-purple-50",
     swatch: "bg-purple-500",
   },
   orange: {
     block:
-      "border-orange-500 bg-orange-500/20 text-orange-950 dark:bg-orange-500/25 dark:text-orange-50",
+      "border-orange-500 bg-orange-500/20 text-orange-950 dark:bg-orange-500/25 dark:text-orange-50 hyper-focus:bg-orange-500/25 hyper-focus:text-orange-50",
     swatch: "bg-orange-500",
   },
   pink: {
     block:
-      "border-pink-500 bg-pink-500/20 text-pink-950 dark:bg-pink-500/25 dark:text-pink-50",
+      "border-pink-500 bg-pink-500/20 text-pink-950 dark:bg-pink-500/25 dark:text-pink-50 hyper-focus:bg-pink-500/25 hyper-focus:text-pink-50",
     swatch: "bg-pink-500",
   },
   red: {
     block:
-      "border-red-500 bg-red-500/20 text-red-950 dark:bg-red-500/25 dark:text-red-50",
+      "border-red-500 bg-red-500/20 text-red-950 dark:bg-red-500/25 dark:text-red-50 hyper-focus:bg-red-500/25 hyper-focus:text-red-50",
     swatch: "bg-red-500",
   },
 };

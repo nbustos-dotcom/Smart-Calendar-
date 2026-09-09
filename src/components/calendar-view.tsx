@@ -967,7 +967,7 @@ function WeekView({
                             "absolute overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] leading-tight",
                             isAssignment
                               ? "border-l-4 border-amber-500 bg-amber-500/15 text-amber-950 shadow-sm dark:text-amber-100 hyper-focus:bg-amber-500/25 hyper-focus:text-amber-100"
-                              : "border-l-2 border-blue-300 bg-blue-500/5 text-blue-800/80 dark:border-blue-400/40 dark:text-blue-200/70"
+                              : "border-l-2 border-blue-300 bg-blue-500/5 text-blue-800/80 dark:border-blue-400/40 dark:text-blue-200/70 hyper-focus:text-blue-200/80"
                           )}
                           style={{
                             top: blockTop,
@@ -1132,7 +1132,7 @@ function CollapsedCluster({
           "absolute left-0.5 right-0.5 flex flex-col justify-center overflow-hidden rounded-md border-l-2 px-1.5 py-0.5 text-left text-[11px] leading-tight",
           allAssignments
             ? "border-amber-500 bg-amber-500/15 text-amber-900 dark:text-amber-100 hyper-focus:text-amber-100"
-            : "border-blue-500 bg-blue-500/15 text-blue-900 dark:text-blue-100"
+            : "border-blue-500 bg-blue-500/15 text-blue-900 dark:text-blue-100 hyper-focus:text-blue-100"
         )}
         style={{ top, height }}
         title={`${items.length} items at ${startLabel} — click to expand`}
@@ -1320,7 +1320,7 @@ function MiniChip({
       className={cn(
         "truncate rounded px-1 py-0.5 text-[10px] leading-tight",
         color === "blue"
-          ? "bg-blue-500/10 text-blue-700 dark:text-blue-300"
+          ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 hyper-focus:text-blue-200"
           : "bg-amber-500/10 text-amber-700 dark:text-amber-300 hyper-focus:text-amber-200"
       )}
       title={label}

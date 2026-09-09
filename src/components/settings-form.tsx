@@ -116,7 +116,9 @@ export function SettingsForm({ status }: { status: ConnectionStatus }) {
       {message && (
         <p
           className={
-            message.ok ? "text-sm text-green-600" : "text-sm text-destructive"
+            message.ok
+              ? "text-sm text-green-600 hyper-focus:text-green-400"
+              : "text-sm text-destructive"
           }
           role="status"
         >
