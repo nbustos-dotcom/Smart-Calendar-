@@ -38,26 +38,37 @@
 }
 
 .dark {
-  /* Darkest tone for the page; card/popover surfaces are lifted a clear step
-     lighter so panels visibly sit ON TOP of the background. */
-  --background: oklch(0.13 0 0);
+  /* Main page background: dark charcoal instead of almost black */
+  --background: oklch(0.18 0 0);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.225 0 0);
+
+  /* Cards / calendar: clearly lighter than the page background */
+  --card: oklch(0.25 0 0);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.225 0 0);
+
+  /* Dropdowns / popovers use the same raised surface */
+  --popover: oklch(0.25 0 0);
   --popover-foreground: oklch(0.985 0 0);
+
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+
+  /* Secondary surfaces */
+  --secondary: oklch(0.285 0 0);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+
+  --muted: oklch(0.285 0 0);
+  --muted-foreground: oklch(0.72 0 0);
+
+  --accent: oklch(0.285 0 0);
   --accent-foreground: oklch(0.985 0 0);
+
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+
+  /* Slightly more visible borders around cards/calendar elements */
+  --border: oklch(1 0 0 / 13%);
+  --input: oklch(1 0 0 / 17%);
+  --ring: oklch(0.6 0 0);
 }
 
 @theme inline {
