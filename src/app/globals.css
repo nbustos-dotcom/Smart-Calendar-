@@ -91,8 +91,8 @@
 
 .hyper-focus {
   /* Main background */
-  --background: oklch(0.27 0.19 264);
-  --foreground: oklch(0.27 0.19 264);
+  --background: oklch(0.18 0.055 255);
+  --foreground: oklch(0.96 0.01 250);
 
   /* Calendar / cards */
   --card: oklch(0.27 0.045 250);
@@ -260,7 +260,8 @@ html.hyper-focus body {
     var(--focus-background-gradient) !important;
 
   background-color:
-    oklch(0.27 0.19 264) !important; 
+    oklch(0.18 0.055 255) !important;
+
   color: var(--foreground);
 }
 
