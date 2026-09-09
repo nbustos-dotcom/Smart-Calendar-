@@ -15,6 +15,7 @@ import { UpcomingAssignments } from "@/components/upcoming-assignments";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { AssignmentItem, ClassEventItem } from "@/lib/types";
+import type { UserEventRow, OverrideRow } from "@/lib/recurrence";
 
 // Supabase returns embedded relations as an object; type it loosely here and
 // normalize below.
@@ -55,6 +56,18 @@ export default async function HomePage() {
       "id, title, start_at, end_at, location_name, html_url, courses(name)"
     )
     .order("start_at", { ascending: true, nullsFirst: false });
+
+  // The user's own editable events (Phase 2) + per-occurrence overrides.
+  const { data: userEventRows } = await supabase
+    .from("user_events")
+    .select(
+      "id, title, color, is_recurring, starts_at, ends_at, weekdays, start_minute, end_minute, series_start_date"
+    );
+  const { data: overrideRows } = await supabase
+    .from("user_event_overrides")
+    .select(
+      "id, event_id, occurrence_date, status, starts_at, ends_at, title, color"
+    );
 
   const assignments: AssignmentItem[] = (
     (assignmentRows ?? []) as unknown as AssignmentRow[]
@@ -141,7 +154,12 @@ export default async function HomePage() {
           {/* Two columns, tops level (items-stretch), stacking on narrow screens. */}
           <div className="flex min-h-0 flex-1 flex-col gap-2.5 xl:flex-row xl:items-stretch">
             <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <CalendarView assignments={assignments} events={events} />
+              <CalendarView
+                assignments={assignments}
+                events={events}
+                userEvents={(userEventRows ?? []) as unknown as UserEventRow[]}
+                overrides={(overrideRows ?? []) as unknown as OverrideRow[]}
+              />
             </section>
             {/* Width is controlled by TodoPanel itself (collapsed rail vs full
                 panel); the calendar (flex-1) reclaims the space when collapsed. */}
