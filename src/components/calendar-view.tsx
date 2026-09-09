@@ -28,6 +28,7 @@ import {
   type UserEventRow,
 } from "@/lib/recurrence";
 import { colorStyle, type EventColor } from "@/lib/event-colors";
+import { layoutOverlaps } from "@/lib/overlap-layout";
 import {
   EventDialog,
   type EditTarget,
@@ -56,7 +57,6 @@ const GRID_PAD_TOP = 10; // top padding so the first hour label isn't clipped
 const MIN_BLOCK_PX = 26; // smallest a block can render, so its label still fits
 const DEFAULT_EVENT_MIN = 60; // assume 1 hour when an event has no end time
 const DUE_BLOCK_MIN = 30; // a deadline is a moment; show it as a short block
-const MAX_SIDE_BY_SIDE = 2; // beyond this many overlapping items, collapse them
 const SNAP_MIN = 15; // drag/resize snaps to a 15-minute grid
 const CLICK_SLOP_PX = 4; // movement under this counts as a click, not a drag
 
@@ -69,13 +69,6 @@ type GridBlock = {
   subtitle: string;
   startMin: number; // minutes from midnight
   endMin: number; // minutes from midnight
-};
-
-// A set of blocks that overlap in time and must share a day column's width.
-type Cluster = {
-  key: string;
-  startMin: number;
-  items: GridBlock[];
 };
 
 // What the create/edit dialog is currently working on. `target` is null for a
@@ -498,6 +491,27 @@ type UserBlock = {
   endMin: number;
 };
 
+// One block placed in a day column, tagged by which layer it belongs to. The
+// read-only Canvas items and the user's own events are laid out TOGETHER (one
+// layoutOverlaps pass), so anything overlapping in time splits the column
+// side-by-side instead of stacking — but each still renders with its own layer's
+// styling and interactivity.
+type ColumnBlock =
+  | {
+      key: string;
+      layer: "readonly";
+      startMin: number;
+      endMin: number;
+      block: GridBlock;
+    }
+  | {
+      key: string;
+      layer: "user";
+      startMin: number;
+      endMin: number;
+      occ: EventOccurrence;
+    };
+
 // A live drag in progress (move or resize of ONE user occurrence).
 type DragState = {
   occ: EventOccurrence;
@@ -534,8 +548,6 @@ function WeekView({
   onOccurrenceClick: (occ: EventOccurrence) => void;
   onCommitTimes: (occ: EventOccurrence, start: Date, end: Date) => void;
 }) {
-  // Which collapsed overlap-cluster (if any) is currently expanded.
-  const [openCluster, setOpenCluster] = useState<string | null>(null);
 
   // Refs used to auto-scroll the grid to the user's day on load (see effect).
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -901,7 +913,6 @@ function WeekView({
             {/* Day columns */}
             {perDay.map(({ day, timed }, dayIndex) => {
               const isToday = isSameDay(day, today);
-              const clusters = clusterOverlaps(timed);
 
               // The user's own occurrences that currently sit in THIS column
               // (accounting for a live drag that may have moved one here).
@@ -909,7 +920,31 @@ function WeekView({
                 .map((occ) => ({ occ, ...effectivePos(occ) }))
                 .filter((b) => b.dayIndex === dayIndex)
                 .map(({ occ, startMin, endMin }) => ({ occ, startMin, endMin }));
-              const laidOut = layoutColumn(columnUserBlocks);
+
+              // Lay the read-only Canvas items AND the user's events out in ONE
+              // pass, so anything overlapping in time splits the column width
+              // side-by-side (Google-Calendar style) instead of stacking. Each
+              // block still renders with its own layer's styling/interactivity.
+              const placed = layoutOverlaps<ColumnBlock>([
+                ...timed.map(
+                  (b): ColumnBlock => ({
+                    key: `ro-${b.id}`,
+                    layer: "readonly",
+                    startMin: b.startMin,
+                    endMin: b.endMin,
+                    block: b,
+                  })
+                ),
+                ...columnUserBlocks.map(
+                  (u): ColumnBlock => ({
+                    key: u.occ.key,
+                    layer: "user",
+                    startMin: u.startMin,
+                    endMin: u.endMin,
+                    occ: u.occ,
+                  })
+                ),
+              ]);
 
               return (
                 <div
@@ -926,42 +961,32 @@ function WeekView({
                 >
                   {isToday && <NowLine minHour={minHour} maxHour={maxHour} />}
 
-                  {/* Read-only assignment/class blocks (not interactive). */}
-                  {clusters.map((cluster) => {
-                    const clusterKey = `${day.toISOString()}::${cluster.key}`;
-                    const top = Math.max(0, yFor(cluster.startMin));
+                  {/* Every block in this column — read-only Canvas items and the
+                      user's own events — placed by the SAME overlap layout, so
+                      overlapping times sit side-by-side. Each renders with its
+                      own layer's look and interactivity. */}
+                  {placed.map((item) => {
+                    const blockTop = Math.max(0, yFor(item.startMin));
+                    const height = Math.max(
+                      MIN_BLOCK_PX,
+                      Math.min(
+                        yFor(item.endMin) - blockTop,
+                        totalHeight - blockTop
+                      )
+                    );
+                    const widthPct = 100 / item.laneCount;
+                    const left = `calc(${item.lane * widthPct}% + 2px)`;
+                    const width = `calc(${widthPct}% - 4px)`;
 
-                    if (cluster.items.length > MAX_SIDE_BY_SIDE) {
-                      return (
-                        <CollapsedCluster
-                          key={clusterKey}
-                          top={top}
-                          totalHeight={totalHeight}
-                          items={cluster.items}
-                          open={openCluster === clusterKey}
-                          onToggle={() =>
-                            setOpenCluster((k) =>
-                              k === clusterKey ? null : clusterKey
-                            )
-                          }
-                        />
-                      );
-                    }
-
-                    const lanes = cluster.items.length;
-                    return cluster.items.map((b, lane) => {
-                      const blockTop = Math.max(0, yFor(b.startMin));
-                      const height = Math.max(
-                        MIN_BLOCK_PX,
-                        Math.min(yFor(b.endMin) - blockTop, totalHeight - blockTop)
-                      );
-                      const widthPct = 100 / lanes;
+                    // Read-only Canvas assignment / class event (not interactive).
+                    if (item.layer === "readonly") {
+                      const b = item.block;
                       const isAssignment = b.kind === "assignment";
                       return (
                         <div
-                          key={b.id}
-                          // Read-only: swallow the click so it doesn't open the
-                          // "new event" dialog, but nothing here is editable.
+                          key={item.key}
+                          // Swallow the click so it doesn't open the "new event"
+                          // dialog; nothing here is editable.
                           onClick={(e) => e.stopPropagation()}
                           className={cn(
                             "absolute overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] leading-tight",
@@ -969,12 +994,7 @@ function WeekView({
                               ? "border-l-4 border-amber-500 bg-amber-500/15 text-amber-950 shadow-sm dark:text-amber-100 hyper-focus:bg-amber-500/25 hyper-focus:text-amber-100"
                               : "border-l-2 border-blue-300 bg-blue-500/5 text-blue-800/80 dark:border-blue-400/40 dark:text-blue-200/70 hyper-focus:text-blue-200/80"
                           )}
-                          style={{
-                            top: blockTop,
-                            height,
-                            left: `calc(${lane * widthPct}% + 2px)`,
-                            width: `calc(${widthPct}% - 4px)`,
-                          }}
+                          style={{ top: blockTop, height, left, width }}
                           title={`${b.title} — ${b.subtitle}`}
                         >
                           <div
@@ -999,48 +1019,35 @@ function WeekView({
                           )}
                         </div>
                       );
-                    });
-                  })}
+                    }
 
-                  {/* The user's own events — interactive (click, move, resize). */}
-                  {laidOut.map((b) => {
-                    const blockTop = Math.max(0, yFor(b.startMin));
-                    const height = Math.max(
-                      MIN_BLOCK_PX,
-                      Math.min(yFor(b.endMin) - blockTop, totalHeight - blockTop)
-                    );
-                    const widthPct = 100 / b.laneCount;
-                    const isDragging = drag?.occ.key === b.occ.key;
+                    // The user's own event — interactive (click, move, resize).
+                    const occ = item.occ;
+                    const isDragging = drag?.occ.key === occ.key;
                     return (
                       <div
-                        key={b.occ.key}
-                        onPointerDown={(e) => startDrag(e, b.occ, "move")}
+                        key={item.key}
+                        onPointerDown={(e) => startDrag(e, occ, "move")}
                         onClick={(e) => e.stopPropagation()}
                         className={cn(
                           "group absolute cursor-grab touch-none select-none overflow-hidden rounded-md border-l-4 px-1.5 py-0.5 text-[11px] leading-tight shadow-sm",
-                          colorStyle(b.occ.color).block,
+                          colorStyle(occ.color).block,
                           isDragging &&
                             "z-40 cursor-grabbing opacity-90 shadow-lg ring-2 ring-foreground/30"
                         )}
-                        style={{
-                          top: blockTop,
-                          height,
-                          left: `calc(${b.lane * widthPct}% + 2px)`,
-                          width: `calc(${widthPct}% - 4px)`,
-                        }}
-                        title={`${b.occ.title} — drag to move, drag the bottom edge to resize`}
+                        style={{ top: blockTop, height, left, width }}
+                        title={`${occ.title} — drag to move, drag the bottom edge to resize`}
                       >
-                        <div className="truncate font-medium">
-                          {b.occ.title}
-                        </div>
+                        <div className="truncate font-medium">{occ.title}</div>
                         {height > 34 && (
                           <div className="truncate opacity-80">
-                            {formatMinutes(b.startMin)}–{formatMinutes(b.endMin)}
+                            {formatMinutes(item.startMin)}–
+                            {formatMinutes(item.endMin)}
                           </div>
                         )}
                         {/* Bottom-edge resize handle. */}
                         <div
-                          onPointerDown={(e) => startDrag(e, b.occ, "resize")}
+                          onPointerDown={(e) => startDrag(e, occ, "resize")}
                           className="absolute inset-x-0 bottom-0 h-2 cursor-ns-resize"
                         />
                       </div>
@@ -1053,137 +1060,6 @@ function WeekView({
         </div>
       </div>
     </div>
-  );
-}
-
-// Greedy overlap layout for the user's own blocks in one day column: each block
-// gets a lane (column) index and the total number of lanes in its overlap group,
-// so overlapping events sit side by side instead of on top of each other.
-function layoutColumn(
-  items: UserBlock[]
-): (UserBlock & { lane: number; laneCount: number })[] {
-  const sorted = [...items].sort(
-    (a, b) => a.startMin - b.startMin || a.endMin - b.endMin
-  );
-  const out: (UserBlock & { lane: number; laneCount: number })[] = [];
-
-  let group: UserBlock[] = [];
-  let groupEnd = -1;
-
-  const flush = () => {
-    if (group.length === 0) return;
-    const laneEnds: number[] = []; // end minute currently occupying each lane
-    const assigned: { item: UserBlock; lane: number }[] = [];
-    for (const it of group) {
-      let lane = laneEnds.findIndex((end) => end <= it.startMin);
-      if (lane === -1) {
-        lane = laneEnds.length;
-        laneEnds.push(it.endMin);
-      } else {
-        laneEnds[lane] = it.endMin;
-      }
-      assigned.push({ item: it, lane });
-    }
-    const laneCount = laneEnds.length;
-    for (const a of assigned) {
-      out.push({ ...a.item, lane: a.lane, laneCount });
-    }
-    group = [];
-    groupEnd = -1;
-  };
-
-  for (const it of sorted) {
-    if (group.length > 0 && it.startMin >= groupEnd) flush();
-    group.push(it);
-    groupEnd = Math.max(groupEnd, it.endMin);
-  }
-  flush();
-  return out;
-}
-
-// A collapsed stack of 3+ overlapping read-only items. Shows a single readable
-// summary block; clicking it expands a full list so every title is legible.
-function CollapsedCluster({
-  top,
-  totalHeight,
-  items,
-  open,
-  onToggle,
-}: {
-  top: number;
-  totalHeight: number;
-  items: GridBlock[];
-  open: boolean;
-  onToggle: () => void;
-}) {
-  const allAssignments = items.every((b) => b.kind === "assignment");
-  const startLabel = formatMinutes(items[0].startMin);
-  const height = Math.max(MIN_BLOCK_PX, Math.min(HOUR_PX, totalHeight - top));
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle();
-        }}
-        className={cn(
-          "absolute left-0.5 right-0.5 flex flex-col justify-center overflow-hidden rounded-md border-l-2 px-1.5 py-0.5 text-left text-[11px] leading-tight",
-          allAssignments
-            ? "border-amber-500 bg-amber-500/15 text-amber-900 dark:text-amber-100 hyper-focus:text-amber-100"
-            : "border-blue-500 bg-blue-500/15 text-blue-900 dark:text-blue-100 hyper-focus:text-blue-100"
-        )}
-        style={{ top, height }}
-        title={`${items.length} items at ${startLabel} — click to expand`}
-      >
-        <span className="truncate font-medium">
-          {items.length} {allAssignments ? "due" : "items"} · {startLabel}
-        </span>
-        <span className="truncate text-muted-foreground">
-          {open ? "click to collapse" : "click to expand"}
-        </span>
-      </button>
-
-      {open && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="absolute left-0.5 right-0.5 z-30 max-h-64 overflow-auto rounded-md border bg-popover p-1.5 text-popover-foreground shadow-lg"
-          style={{ top }}
-        >
-          <div className="mb-1 flex items-center justify-between px-0.5">
-            <span className="text-[11px] font-medium">
-              {items.length} at {startLabel}
-            </span>
-            <button
-              type="button"
-              onClick={onToggle}
-              className="text-[11px] text-muted-foreground hover:underline"
-            >
-              close
-            </button>
-          </div>
-          <ul className="flex flex-col gap-1">
-            {items.map((b) => (
-              <li
-                key={b.id}
-                className={cn(
-                  "rounded border-l-2 px-1.5 py-1 text-[11px] leading-tight",
-                  b.kind === "event"
-                    ? "border-blue-500 bg-blue-500/10"
-                    : "border-amber-500 bg-amber-500/10"
-                )}
-              >
-                <div className="font-medium">
-                  <ItemLink href={b.href}>{b.title}</ItemLink>
-                </div>
-                <div className="text-muted-foreground">{b.subtitle}</div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </>
   );
 }
 
@@ -1438,36 +1314,6 @@ function hourRange(
     Math.max(DAY_START_HOUR + 8, Math.ceil(max / 60))
   );
   return { minHour: DAY_START_HOUR, maxHour };
-}
-
-// Group read-only blocks that overlap in time into clusters.
-function clusterOverlaps(blocks: GridBlock[]): Cluster[] {
-  const sorted = [...blocks].sort(
-    (a, b) => a.startMin - b.startMin || a.endMin - b.endMin
-  );
-  const clusters: Cluster[] = [];
-  let current: GridBlock[] = [];
-  let currentEnd = -1;
-
-  const flush = () => {
-    if (current.length === 0) return;
-    const startMin = Math.min(...current.map((b) => b.startMin));
-    clusters.push({
-      key: `${startMin}-${currentEnd}-${current.length}`,
-      startMin,
-      items: current,
-    });
-    current = [];
-    currentEnd = -1;
-  };
-
-  for (const b of sorted) {
-    if (current.length > 0 && b.startMin >= currentEnd) flush();
-    current.push(b);
-    currentEnd = Math.max(currentEnd, b.endMin);
-  }
-  flush();
-  return clusters;
 }
 
 // "8 AM", "12 PM", "11 PM" for an hour number 0..23.
