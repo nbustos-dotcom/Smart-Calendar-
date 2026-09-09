@@ -93,6 +93,8 @@
    - Lighter blue-gray cards/calendar
    - Brighter blue controls
    - Warm gold accents
+   - High readability
+   - No harsh white application background
    - No neon orange, lime, or purple
    ========================================================================== */
 
@@ -117,11 +119,11 @@
   --secondary: oklch(0.30 0.043 248);
   --secondary-foreground: oklch(0.95 0.012 245);
 
-  /* Muted calendar areas */
+  /* Muted areas */
   --muted: oklch(0.285 0.032 250);
-  --muted-foreground: oklch(0.73 0.025 245);
+  --muted-foreground: oklch(0.76 0.025 245);
 
-  /* GOLD accent */
+  /* Gold accent */
   --accent: oklch(0.79 0.145 88);
   --accent-foreground: oklch(0.19 0.035 250);
 
@@ -256,6 +258,7 @@ body {
 
 body {
   min-height: 100vh;
+  margin: 0;
   background-color: var(--background);
   color: var(--foreground);
 }
@@ -264,49 +267,112 @@ body {
 /* ==========================================================================
    HYPER FOCUS PAGE
 
-   This controls the dark-blue area behind the application.
+   The Hyper Focus class may be placed on html, body, the application root,
+   or an application wrapper. These rules support each structure.
    ========================================================================== */
 
+.hyper-focus {
+  min-height: 100vh;
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
 html.hyper-focus,
-html.hyper-focus body {
+html:has(body.hyper-focus),
+html:has(#root > .hyper-focus),
+html:has(#__next > .hyper-focus) {
   background-color: var(--background);
 }
 
-html.hyper-focus body {
+html.hyper-focus body,
+body.hyper-focus {
+  min-height: 100vh;
+
+  background-color: var(--background);
   background-image: var(--focus-page);
   background-attachment: fixed;
+  background-position: center;
+  background-repeat: no-repeat;
   background-size: cover;
+
   color: var(--foreground);
 }
 
 
 /* ==========================================================================
-   TOP-LEVEL APP SHELL FIX
+   APPLICATION ROOT
 
-   Your screenshot shows the actual calendar already becoming blue,
-   while the main wrapper around it stays white.
-
-   We ONLY target the first application container here instead of globally
-   replacing every white component.
+   Prevent React / Next root containers from introducing a white background.
    ========================================================================== */
 
-html.hyper-focus body > #root,
-html.hyper-focus body > #__next {
+html.hyper-focus #root,
+html.hyper-focus #__next,
+body.hyper-focus #root,
+body.hyper-focus #__next {
   min-height: 100vh;
-  background: transparent;
+
+  background: transparent !important;
+
   color: var(--foreground);
 }
 
-html.hyper-focus body > #root > div:first-child,
-html.hyper-focus body > #__next > div:first-child {
+
+/* ==========================================================================
+   HYPER FOCUS APPLICATION SHELL
+
+   This removes the large white application background visible around the
+   calendar while leaving individual components alone.
+   ========================================================================== */
+
+html.hyper-focus #root > :first-child,
+html.hyper-focus #__next > :first-child,
+body.hyper-focus #root > :first-child,
+body.hyper-focus #__next > :first-child,
+#root > .hyper-focus,
+#__next > .hyper-focus {
   min-height: 100vh;
-  background:
+
+  background-color: var(--background) !important;
+  background-image: var(--focus-page) !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  background-size: cover !important;
+
+  color: var(--foreground);
+}
+
+
+/* ==========================================================================
+   NESTED HYPER FOCUS FALLBACK
+
+   If Hyper Focus is placed inside the first application wrapper instead of
+   directly on it, make that wrapper use the Hyper Focus background too.
+   ========================================================================== */
+
+#root > :first-child:has(.hyper-focus),
+#__next > :first-child:has(.hyper-focus) {
+  min-height: 100vh;
+
+  background-color: oklch(0.185 0.055 253) !important;
+
+  background-image:
+    radial-gradient(
+      circle at 8% 5%,
+      oklch(0.30 0.085 245 / 28%),
+      transparent 36%
+    ),
+    radial-gradient(
+      circle at 92% 95%,
+      oklch(0.24 0.065 270 / 22%),
+      transparent 40%
+    ),
     linear-gradient(
       145deg,
-      oklch(0.22 0.052 248),
-      oklch(0.175 0.043 258)
-    );
-  color: var(--foreground);
+      oklch(0.205 0.06 250),
+      oklch(0.155 0.047 260)
+    ) !important;
+
+  color: oklch(0.955 0.012 245);
 }
 
 
@@ -314,27 +380,32 @@ html.hyper-focus body > #__next > div:first-child {
    STANDARD THEME SURFACES
    ========================================================================== */
 
-.hyper-focus .bg-background {
+.hyper-focus .bg-background,
+.hyper-focus.bg-background {
   background-color: var(--background);
   color: var(--foreground);
 }
 
-.hyper-focus .bg-card {
+.hyper-focus .bg-card,
+.hyper-focus.bg-card {
   background: var(--focus-card);
   color: var(--card-foreground);
 }
 
-.hyper-focus .bg-popover {
+.hyper-focus .bg-popover,
+.hyper-focus.bg-popover {
   background: var(--focus-popover);
   color: var(--popover-foreground);
 }
 
-.hyper-focus .bg-secondary {
+.hyper-focus .bg-secondary,
+.hyper-focus.bg-secondary {
   background: var(--focus-secondary);
   color: var(--secondary-foreground);
 }
 
-.hyper-focus .bg-muted {
+.hyper-focus .bg-muted,
+.hyper-focus.bg-muted {
   background: var(--focus-muted);
   color: var(--muted-foreground);
 }
@@ -344,7 +415,8 @@ html.hyper-focus body > #__next > div:first-child {
    PRIMARY BUTTONS
    ========================================================================== */
 
-.hyper-focus .bg-primary {
+.hyper-focus .bg-primary,
+.hyper-focus.bg-primary {
   background: var(--focus-blue);
   color: var(--primary-foreground);
 }
@@ -354,12 +426,14 @@ html.hyper-focus body > #__next > div:first-child {
    GOLD ACCENTS
    ========================================================================== */
 
-.hyper-focus .bg-accent {
+.hyper-focus .bg-accent,
+.hyper-focus.bg-accent {
   background: var(--focus-gold);
   color: var(--accent-foreground);
 }
 
-.hyper-focus .text-accent-foreground {
+.hyper-focus .text-accent-foreground,
+.hyper-focus.text-accent-foreground {
   color: var(--accent-foreground);
 }
 
@@ -369,7 +443,9 @@ html.hyper-focus body > #__next > div:first-child {
    ========================================================================== */
 
 .hyper-focus .bg-card,
-.hyper-focus .bg-popover {
+.hyper-focus .bg-popover,
+.hyper-focus.bg-card,
+.hyper-focus.bg-popover {
   box-shadow:
     inset 0 1px 0 oklch(1 0 0 / 5%),
     0 8px 28px oklch(0.08 0.03 260 / 20%);
@@ -380,12 +456,29 @@ html.hyper-focus body > #__next > div:first-child {
    TEXT
    ========================================================================== */
 
-.hyper-focus .text-foreground {
+.hyper-focus .text-foreground,
+.hyper-focus.text-foreground {
   color: var(--foreground);
 }
 
-.hyper-focus .text-muted-foreground {
+.hyper-focus .text-muted-foreground,
+.hyper-focus.text-muted-foreground {
   color: var(--muted-foreground);
+}
+
+.hyper-focus .text-card-foreground,
+.hyper-focus.text-card-foreground {
+  color: var(--card-foreground);
+}
+
+.hyper-focus .text-popover-foreground,
+.hyper-focus.text-popover-foreground {
+  color: var(--popover-foreground);
+}
+
+.hyper-focus .text-secondary-foreground,
+.hyper-focus.text-secondary-foreground {
+  color: var(--secondary-foreground);
 }
 
 
@@ -393,7 +486,8 @@ html.hyper-focus body > #__next > div:first-child {
    BORDERS
    ========================================================================== */
 
-.hyper-focus .border-border {
+.hyper-focus .border-border,
+.hyper-focus.border-border {
   border-color: var(--border);
 }
 
@@ -425,6 +519,19 @@ html.hyper-focus body > #__next > div:first-child {
 .hyper-focus select:focus,
 .hyper-focus button:focus-visible {
   outline-color: var(--ring);
+}
+
+
+/* ==========================================================================
+   SELECTION
+
+   Makes highlighted text match Hyper Focus instead of using the browser's
+   default bright selection color.
+   ========================================================================== */
+
+.hyper-focus ::selection {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
 }
 
 
