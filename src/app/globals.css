@@ -3,9 +3,9 @@
    Loads Tailwind and defines the shadcn/ui color themes:
    light mode, dark mode, and hyper-focus mode.
 
-   Light and dark modes remain clean and neutral.
-   Hyper-focus uses a darker graphite/slate palette with subtle gradients
-   and cool blue-gray accents to create depth without excessive stimulation.
+   Light and dark stay clean and neutral.
+   Hyper-focus uses a darker blue-gray palette with subtle gradients,
+   blue primary actions, and a gold accent bubble.
    ========================================================================== */
 
 @import "tailwindcss";
@@ -24,13 +24,12 @@
 
 /* ==========================================================================
    LIGHT MODE
-   Default shadcn "new-york" neutral theme.
    ========================================================================== */
 
 :root {
   --radius: 0.625rem;
 
-  --background: oklch(0.27 0.19 264);   
+  --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
 
   --card: oklch(1 0 0);
@@ -61,42 +60,32 @@
 
 /* ==========================================================================
    DARK MODE
-   Dark charcoal background with visibly raised cards/calendar surfaces.
    ========================================================================== */
 
 .dark {
-  /* Main page */
   --background: oklch(0.18 0 0);
   --foreground: oklch(0.985 0 0);
 
-  /* Cards / calendar */
   --card: oklch(0.25 0 0);
   --card-foreground: oklch(0.985 0 0);
 
-  /* Menus / dropdowns */
   --popover: oklch(0.25 0 0);
   --popover-foreground: oklch(0.985 0 0);
 
-  /* Primary actions */
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
 
-  /* Secondary surfaces */
   --secondary: oklch(0.285 0 0);
   --secondary-foreground: oklch(0.985 0 0);
 
-  /* Muted surfaces / text */
   --muted: oklch(0.285 0 0);
   --muted-foreground: oklch(0.72 0 0);
 
-  /* Hover / accent surfaces */
   --accent: oklch(0.285 0 0);
   --accent-foreground: oklch(0.985 0 0);
 
-  /* Danger */
   --destructive: oklch(0.704 0.191 22.216);
 
-  /* Borders / inputs */
   --border: oklch(1 0 0 / 13%);
   --input: oklch(1 0 0 / 17%);
   --ring: oklch(0.6 0 0);
@@ -105,164 +94,106 @@
 
 /* ==========================================================================
    HYPER-FOCUS MODE
-   Structurally follows dark mode while using a slightly cooler palette.
-
-   Hierarchy:
-   Background
-       ↓
-   Calendar / cards
-       ↓
-   Secondary / muted surfaces
-       ↓
-   Cool steel-blue accents
-
-   The colors intentionally stay close together so the interface feels
-   cohesive rather than using competing neon colors.
+   Dark blue background
+   Blue-gray cards
+   Blue primary
+   Gold accent bubble
    ========================================================================== */
 
 .hyper-focus {
-  /* ------------------------------------------------------------------------
-     Main page
-     Deep graphite with a very subtle cool/slate undertone.
-     ------------------------------------------------------------------------ */
+  /* Main page */
+  --background: oklch(0.20 0.035 250);
+  --foreground: oklch(0.95 0.01 250);
 
-  --background: oklch(0.17 0.012 255);
-  --foreground: oklch(0.94 0.008 255);
+  /* Cards / calendar */
+  --card: oklch(0.27 0.03 248);
+  --card-foreground: oklch(0.96 0.01 250);
 
+  /* Popovers / menus */
+  --popover: oklch(0.295 0.032 248);
+  --popover-foreground: oklch(0.96 0.01 250);
 
-  /* ------------------------------------------------------------------------
-     Calendar / cards
-     Clearly lighter than the page background.
-     ------------------------------------------------------------------------ */
+  /* Primary blue */
+  --primary: oklch(0.69 0.10 240);
+  --primary-foreground: oklch(0.16 0.02 248);
 
-  --card: oklch(0.235 0.018 255);
-  --card-foreground: oklch(0.95 0.008 255);
+  /* Secondary surfaces */
+  --secondary: oklch(0.315 0.03 248);
+  --secondary-foreground: oklch(0.95 0.01 250);
 
+  /* Muted surfaces / text */
+  --muted: oklch(0.285 0.025 248);
+  --muted-foreground: oklch(0.75 0.018 248);
 
-  /* ------------------------------------------------------------------------
-     Menus / dropdowns / dialogs
-     Slightly raised above cards.
-     ------------------------------------------------------------------------ */
+  /* Gold accent bubble */
+  --accent: oklch(0.78 0.11 85);
+  --accent-foreground: oklch(0.22 0.03 248);
 
-  --popover: oklch(0.255 0.02 255);
-  --popover-foreground: oklch(0.95 0.008 255);
+  /* Destructive */
+  --destructive: oklch(0.60 0.17 25);
 
+  /* Borders / inputs / focus */
+  --border: oklch(0.44 0.03 248 / 42%);
+  --input: oklch(0.34 0.03 248);
+  --ring: oklch(0.69 0.10 240);
 
-  /* ------------------------------------------------------------------------
-     Primary actions
-     Muted steel blue instead of electric cyan.
-     ------------------------------------------------------------------------ */
-
-  --primary: oklch(0.67 0.085 235);
-  --primary-foreground: oklch(0.15 0.012 255);
-
-
-  /* ------------------------------------------------------------------------
-     Secondary surfaces
-     Used for buttons, controls, and raised calendar areas.
-     ------------------------------------------------------------------------ */
-
-  --secondary: oklch(0.285 0.022 255);
-  --secondary-foreground: oklch(0.94 0.008 255);
-
-
-  /* ------------------------------------------------------------------------
-     Muted surfaces
-     Used for inactive calendar areas and secondary information.
-     ------------------------------------------------------------------------ */
-
-  --muted: oklch(0.265 0.018 255);
-  --muted-foreground: oklch(0.70 0.018 255);
-
-
-  /* ------------------------------------------------------------------------
-     Accent
-     Subtle blue/slate-purple tone that complements the primary blue.
-     ------------------------------------------------------------------------ */
-
-  --accent: oklch(0.34 0.045 265);
-  --accent-foreground: oklch(0.96 0.008 255);
-
-
-  /* ------------------------------------------------------------------------
-     Destructive actions
-     Muted red rather than bright neon red.
-     ------------------------------------------------------------------------ */
-
-  --destructive: oklch(0.59 0.16 25);
-
-
-  /* ------------------------------------------------------------------------
-     Borders / inputs / focus
-     ------------------------------------------------------------------------ */
-
-  --border: oklch(0.42 0.022 255 / 42%);
-  --input: oklch(0.31 0.024 255);
-  --ring: oklch(0.66 0.085 235);
-
-
-  /* ------------------------------------------------------------------------
-     Hyper-focus gradient tokens
-     ------------------------------------------------------------------------ */
-
+  /* Background gradient */
   --focus-background-gradient:
     radial-gradient(
-      circle at 12% 8%,
-      oklch(0.255 0.04 260 / 32%),
+      circle at 12% 10%,
+      oklch(0.31 0.07 245 / 0.28),
       transparent 38%
     ),
     radial-gradient(
-      circle at 88% 88%,
-      oklch(0.23 0.035 225 / 24%),
+      circle at 88% 85%,
+      oklch(0.25 0.05 260 / 0.24),
       transparent 42%
     ),
     linear-gradient(
       145deg,
-      oklch(0.19 0.018 260),
-      oklch(0.15 0.012 245)
+      oklch(0.24 0.045 248),
+      oklch(0.17 0.03 252)
     );
-
 
   --focus-card-gradient:
     linear-gradient(
       145deg,
-      oklch(0.265 0.025 255),
-      oklch(0.225 0.018 250)
+      oklch(0.31 0.04 246),
+      oklch(0.25 0.028 250)
     );
-
 
   --focus-popover-gradient:
     linear-gradient(
       145deg,
-      oklch(0.285 0.025 255),
-      oklch(0.24 0.018 250)
+      oklch(0.335 0.042 246),
+      oklch(0.275 0.03 250)
     );
-
 
   --focus-secondary-gradient:
     linear-gradient(
       145deg,
-      oklch(0.31 0.028 255),
-      oklch(0.27 0.02 250)
+      oklch(0.35 0.04 245),
+      oklch(0.295 0.028 250)
     );
-
 
   --focus-accent-gradient:
     linear-gradient(
       135deg,
-      oklch(0.38 0.055 255),
-      oklch(0.32 0.045 275)
+      oklch(0.82 0.12 88),
+      oklch(0.72 0.10 78)
+    );
+
+  --focus-muted-gradient:
+    linear-gradient(
+      145deg,
+      oklch(0.305 0.03 246),
+      oklch(0.27 0.022 250)
     );
 }
 
 
 /* ==========================================================================
    TAILWIND THEME MAPPING
-   Maps CSS variables to Tailwind utilities such as:
-   bg-background
-   bg-card
-   text-foreground
-   border-border
    ========================================================================== */
 
 @theme inline {
@@ -323,8 +254,12 @@ body {
   color: var(--foreground);
 }
 
+/* Make sure hyper-focus background is clearly dark blue */
+.hyper-focus,
+.hyper-focus body {
+  background-color: var(--background);
+}
 
-/* Hyper-focus receives its own atmospheric background. */
 .hyper-focus body {
   background: var(--focus-background-gradient);
   background-attachment: fixed;
@@ -334,75 +269,52 @@ body {
 
 /* ==========================================================================
    HYPER-FOCUS SURFACES
-
-   These rules preserve the same component structure used in light/dark mode,
-   while giving the focus theme subtle gradients and depth.
    ========================================================================== */
 
-
-/* Calendar panels and standard cards */
 .hyper-focus .bg-card {
   background: var(--focus-card-gradient);
 }
 
-
-/* Dropdown menus, dialogs, floating menus, etc. */
 .hyper-focus .bg-popover {
   background: var(--focus-popover-gradient);
 }
 
-
-/* Secondary controls and surfaces */
 .hyper-focus .bg-secondary {
   background: var(--focus-secondary-gradient);
 }
 
-
-/* Accent / highlighted surfaces */
 .hyper-focus .bg-accent {
   background: var(--focus-accent-gradient);
+  color: var(--accent-foreground);
 }
 
-
-/* Muted areas remain quieter than the main card surfaces. */
 .hyper-focus .bg-muted {
-  background:
-    linear-gradient(
-      145deg,
-      oklch(0.285 0.021 255),
-      oklch(0.25 0.016 250)
-    );
+  background: var(--focus-muted-gradient);
 }
 
 
 /* ==========================================================================
-   HYPER-FOCUS CARD DEPTH
-
-   Soft shadows keep cards visually separated from the background
-   without creating bright glows.
+   HYPER-FOCUS DEPTH
    ========================================================================== */
 
 .hyper-focus .bg-card,
 .hyper-focus .bg-popover {
   box-shadow:
     inset 0 1px 0 oklch(1 0 0 / 4%),
-    0 8px 30px oklch(0.07 0.018 255 / 22%);
+    0 8px 30px oklch(0.08 0.02 250 / 22%);
 }
 
-
-/* Slightly softer depth for secondary surfaces. */
 .hyper-focus .bg-secondary,
-.hyper-focus .bg-muted {
+.hyper-focus .bg-muted,
+.hyper-focus .bg-accent {
   box-shadow:
     inset 0 1px 0 oklch(1 0 0 / 3%),
-    0 4px 18px oklch(0.07 0.018 255 / 12%);
+    0 4px 18px oklch(0.08 0.02 250 / 12%);
 }
 
 
 /* ==========================================================================
    HYPER-FOCUS TRANSITIONS
-
-   Keeps switching and hover states smooth instead of visually abrupt.
    ========================================================================== */
 
 .hyper-focus body,
@@ -422,9 +334,6 @@ body {
 
 /* ==========================================================================
    SCROLLBARS
-
-   Hides visible scrollbar chrome while keeping scrolling functional.
-   Used by calendar grid, upcoming strip, and month view.
    ========================================================================== */
 
 .no-scrollbar {
