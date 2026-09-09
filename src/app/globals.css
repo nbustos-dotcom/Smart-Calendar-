@@ -41,7 +41,7 @@
   /* Darkest tone for the page; card/popover surfaces are lifted a clear step
      lighter so panels visibly sit ON TOP of the background. */
   --background: oklch(0.13 0 0);
-  --foreground: oklch(0.985 0 0);
+  --foreground: oklch(1.985 0 0);
   --card: oklch(0.225 0 0);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.225 0 0);
