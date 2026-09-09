@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getConnectionStatus } from "@/lib/canvas-connection";
 import { CalendarView } from "@/components/calendar-view";
 import { TodoPanel } from "@/components/todo-panel";
+import { DueTodayBubble } from "@/components/due-today-bubble";
 import { UpcomingAssignments } from "@/components/upcoming-assignments";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -169,6 +170,10 @@ export default async function HomePage() {
           </div>
         </div>
       )}
+
+      {/* Always-visible floating "due today" indicator (reads existing
+          assignment data only). Fixed to the viewport's bottom-right. */}
+      <DueTodayBubble assignments={assignments} />
     </main>
   );
 }
