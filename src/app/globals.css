@@ -1,339 +1,463 @@
 /* ==========================================================================
-   HYPER FOCUS — FINAL VISUAL OVERRIDES
-   Put this section at the VERY BOTTOM of the CSS file.
+   GLOBAL STYLES + THEME
+   Light Mode + Dark Mode + Hyper Focus Mode
    ========================================================================== */
 
+@import "tailwindcss";
+@import "tw-animate-css";
 
-/* --------------------------------------------------------------------------
-   1. MAIN APP BACKGROUND
 
-   Forces the entire app shell to use the dark navy theme instead of white.
-   -------------------------------------------------------------------------- */
+/* ==========================================================================
+   THEME VARIANTS
+   ========================================================================== */
 
-html.hyper-focus,
-html.hyper-focus body,
-html.hyper-focus #root,
-html.hyper-focus #__next {
-  background:
+@custom-variant dark (&:is(.dark *));
+@custom-variant hyper-focus (&:is(.hyper-focus *));
+
+
+/* ==========================================================================
+   LIGHT MODE
+   ========================================================================== */
+
+:root {
+  --radius: 0.625rem;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+
+  --destructive: oklch(0.577 0.245 27.325);
+
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+}
+
+
+/* ==========================================================================
+   DARK MODE
+   ========================================================================== */
+
+.dark {
+  --background: oklch(0.18 0 0);
+  --foreground: oklch(0.985 0 0);
+
+  --card: oklch(0.25 0 0);
+  --card-foreground: oklch(0.985 0 0);
+
+  --popover: oklch(0.25 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+
+  --secondary: oklch(0.285 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+
+  --muted: oklch(0.285 0 0);
+  --muted-foreground: oklch(0.72 0 0);
+
+  --accent: oklch(0.285 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+
+  --destructive: oklch(0.704 0.191 22.216);
+
+  --border: oklch(1 0 0 / 13%);
+  --input: oklch(1 0 0 / 17%);
+  --ring: oklch(0.6 0 0);
+}
+
+
+/* ==========================================================================
+   HYPER FOCUS MODE
+
+   Design:
+   - Deep navy-blue page
+   - Lighter blue-gray cards/calendar
+   - Brighter blue controls
+   - Warm gold accents
+   - No neon orange, lime, or purple
+   ========================================================================== */
+
+.hyper-focus {
+  /* Main page */
+  --background: oklch(0.185 0.055 253);
+  --foreground: oklch(0.955 0.012 245);
+
+  /* Calendar / cards */
+  --card: oklch(0.255 0.045 248);
+  --card-foreground: oklch(0.965 0.01 245);
+
+  /* Menus / dropdowns */
+  --popover: oklch(0.275 0.045 248);
+  --popover-foreground: oklch(0.965 0.01 245);
+
+  /* Main blue */
+  --primary: oklch(0.69 0.115 238);
+  --primary-foreground: oklch(0.16 0.045 252);
+
+  /* Secondary surfaces */
+  --secondary: oklch(0.30 0.043 248);
+  --secondary-foreground: oklch(0.95 0.012 245);
+
+  /* Muted calendar areas */
+  --muted: oklch(0.285 0.032 250);
+  --muted-foreground: oklch(0.73 0.025 245);
+
+  /* GOLD accent */
+  --accent: oklch(0.79 0.145 88);
+  --accent-foreground: oklch(0.19 0.035 250);
+
+  /* Destructive */
+  --destructive: oklch(0.60 0.17 25);
+
+  /* Borders / inputs */
+  --border: oklch(0.45 0.04 248 / 48%);
+  --input: oklch(0.32 0.04 248);
+  --ring: oklch(0.69 0.115 238);
+
+  /* Page atmosphere */
+  --focus-page:
     radial-gradient(
-      circle at 10% 0%,
-      oklch(0.29 0.075 245 / 30%),
+      circle at 8% 5%,
+      oklch(0.30 0.085 245 / 28%),
       transparent 36%
     ),
     radial-gradient(
-      circle at 90% 100%,
-      oklch(0.22 0.065 265 / 25%),
-      transparent 42%
+      circle at 92% 95%,
+      oklch(0.24 0.065 270 / 22%),
+      transparent 40%
     ),
     linear-gradient(
       145deg,
-      oklch(0.205 0.055 250),
-      oklch(0.145 0.045 260)
-    ) !important;
+      oklch(0.205 0.06 250),
+      oklch(0.155 0.047 260)
+    );
 
-  color: oklch(0.95 0.01 250) !important;
+  /* Raised surfaces */
+  --focus-card:
+    linear-gradient(
+      145deg,
+      oklch(0.285 0.05 246),
+      oklch(0.235 0.038 254)
+    );
+
+  --focus-popover:
+    linear-gradient(
+      145deg,
+      oklch(0.305 0.05 246),
+      oklch(0.255 0.04 254)
+    );
+
+  --focus-secondary:
+    linear-gradient(
+      145deg,
+      oklch(0.325 0.052 244),
+      oklch(0.275 0.04 253)
+    );
+
+  --focus-muted:
+    linear-gradient(
+      145deg,
+      oklch(0.295 0.038 247),
+      oklch(0.26 0.03 254)
+    );
+
+  /* Gold */
+  --focus-gold:
+    linear-gradient(
+      135deg,
+      oklch(0.84 0.15 91),
+      oklch(0.75 0.145 80)
+    );
+
+  /* Blue button */
+  --focus-blue:
+    linear-gradient(
+      135deg,
+      oklch(0.72 0.12 235),
+      oklch(0.62 0.12 247)
+    );
+}
+
+
+/* ==========================================================================
+   TAILWIND THEME MAPPING
+   ========================================================================== */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+
+/* ==========================================================================
+   GLOBAL
+   ========================================================================== */
+
+* {
+  border-color: var(--border);
+  outline-color: color-mix(in oklch, var(--ring) 50%, transparent);
+}
+
+html,
+body {
   min-height: 100%;
 }
 
-
-/* --------------------------------------------------------------------------
-   2. REMOVE WHITE APP SURFACES
-
-   Your screenshot shows that parts of the app are still using explicit
-   white/light Tailwind backgrounds. These are converted to dark blue.
-   -------------------------------------------------------------------------- */
-
-.hyper-focus .bg-white,
-.hyper-focus .bg-white\/95,
-.hyper-focus .bg-white\/90,
-.hyper-focus .bg-white\/80,
-.hyper-focus [class*="bg-white/"] {
-  background:
-    linear-gradient(
-      145deg,
-      oklch(0.255 0.045 248),
-      oklch(0.205 0.038 255)
-    ) !important;
-
-  color: oklch(0.95 0.01 250) !important;
+body {
+  min-height: 100vh;
+  background-color: var(--background);
+  color: var(--foreground);
 }
 
 
-/* Background-token surfaces */
+/* ==========================================================================
+   HYPER FOCUS PAGE
+
+   This controls the dark-blue area behind the application.
+   ========================================================================== */
+
+html.hyper-focus,
+html.hyper-focus body {
+  background-color: var(--background);
+}
+
+html.hyper-focus body {
+  background-image: var(--focus-page);
+  background-attachment: fixed;
+  background-size: cover;
+  color: var(--foreground);
+}
+
+
+/* ==========================================================================
+   TOP-LEVEL APP SHELL FIX
+
+   Your screenshot shows the actual calendar already becoming blue,
+   while the main wrapper around it stays white.
+
+   We ONLY target the first application container here instead of globally
+   replacing every white component.
+   ========================================================================== */
+
+html.hyper-focus body > #root,
+html.hyper-focus body > #__next {
+  min-height: 100vh;
+  background: transparent;
+  color: var(--foreground);
+}
+
+html.hyper-focus body > #root > div:first-child,
+html.hyper-focus body > #__next > div:first-child {
+  min-height: 100vh;
+  background:
+    linear-gradient(
+      145deg,
+      oklch(0.22 0.052 248),
+      oklch(0.175 0.043 258)
+    );
+  color: var(--foreground);
+}
+
+
+/* ==========================================================================
+   STANDARD THEME SURFACES
+   ========================================================================== */
+
 .hyper-focus .bg-background {
-  background:
-    linear-gradient(
-      145deg,
-      oklch(0.225 0.05 248),
-      oklch(0.175 0.04 258)
-    ) !important;
-
-  color: oklch(0.95 0.01 250) !important;
+  background-color: var(--background);
+  color: var(--foreground);
 }
-
-
-/* --------------------------------------------------------------------------
-   3. HEADER / TOP APP AREA
-
-   Fixes the white strip where Smart Calendar, Settings and Sign out appear.
-   -------------------------------------------------------------------------- */
-
-.hyper-focus header {
-  background:
-    linear-gradient(
-      90deg,
-      oklch(0.255 0.05 245),
-      oklch(0.205 0.04 258)
-    ) !important;
-
-  color: oklch(0.94 0.015 245) !important;
-  border-color: oklch(0.46 0.04 245 / 40%) !important;
-}
-
-
-/* Make header text readable */
-.hyper-focus header .text-foreground,
-.hyper-focus header [class*="text-gray-"],
-.hyper-focus header [class*="text-slate-"] {
-  color: oklch(0.92 0.018 245) !important;
-}
-
-
-/* Softer secondary header text */
-.hyper-focus header .text-muted-foreground {
-  color: oklch(0.73 0.03 245) !important;
-}
-
-
-/* --------------------------------------------------------------------------
-   4. CARDS / PANELS
-
-   Keep these lighter than the page so the app keeps the same structure
-   as light and dark mode.
-   -------------------------------------------------------------------------- */
 
 .hyper-focus .bg-card {
-  background:
-    linear-gradient(
-      145deg,
-      oklch(0.30 0.05 245),
-      oklch(0.235 0.038 255)
-    ) !important;
-
-  color: oklch(0.96 0.01 250) !important;
-
-  border-color:
-    oklch(0.48 0.045 245 / 42%) !important;
-
-  box-shadow:
-    inset 0 1px 0 oklch(1 0 0 / 5%),
-    0 10px 30px oklch(0.08 0.04 260 / 22%);
+  background: var(--focus-card);
+  color: var(--card-foreground);
 }
-
-
-/* --------------------------------------------------------------------------
-   5. POPOVERS / MENUS
-   -------------------------------------------------------------------------- */
 
 .hyper-focus .bg-popover {
-  background:
-    linear-gradient(
-      145deg,
-      oklch(0.32 0.05 245),
-      oklch(0.25 0.04 255)
-    ) !important;
-
-  color: oklch(0.96 0.01 250) !important;
-
-  border-color:
-    oklch(0.48 0.045 245 / 42%) !important;
+  background: var(--focus-popover);
+  color: var(--popover-foreground);
 }
-
-
-/* --------------------------------------------------------------------------
-   6. GOLD ACCENT COLOR
-
-   Cleaner gold instead of the brown/orange tone.
-   -------------------------------------------------------------------------- */
-
-.hyper-focus .bg-accent {
-  background:
-    linear-gradient(
-      135deg,
-      oklch(0.84 0.145 92),
-      oklch(0.74 0.135 78)
-    ) !important;
-
-  color: oklch(0.18 0.04 250) !important;
-
-  border-color:
-    oklch(0.88 0.12 90 / 55%) !important;
-
-  box-shadow:
-    inset 0 1px 0 oklch(1 0 0 / 22%),
-    0 4px 16px oklch(0.14 0.07 80 / 18%);
-}
-
-
-/* --------------------------------------------------------------------------
-   7. CONVERT YELLOW / AMBER / ORANGE EVENT BUBBLES TO GOLD
-
-   This targets the assignment/event pills visible in your screenshot.
-   -------------------------------------------------------------------------- */
-
-.hyper-focus [class*="bg-yellow-"],
-.hyper-focus [class*="bg-amber-"],
-.hyper-focus [class*="bg-orange-"] {
-  background:
-    linear-gradient(
-      135deg,
-      oklch(0.84 0.145 92),
-      oklch(0.73 0.135 78)
-    ) !important;
-
-  color: oklch(0.17 0.04 250) !important;
-
-  border-color:
-    oklch(0.88 0.12 90 / 50%) !important;
-}
-
-
-/* --------------------------------------------------------------------------
-   8. FIX TEXT INSIDE GOLD BUBBLES
-
-   This is specifically for the pale text visible on your calendar events.
-   -------------------------------------------------------------------------- */
-
-.hyper-focus [class*="bg-yellow-"] *,
-.hyper-focus [class*="bg-amber-"] *,
-.hyper-focus [class*="bg-orange-"] *,
-.hyper-focus .bg-accent * {
-  color: oklch(0.17 0.04 250) !important;
-}
-
-
-/* Also override explicit white text inside gold events */
-.hyper-focus [class*="bg-yellow-"].text-white,
-.hyper-focus [class*="bg-amber-"].text-white,
-.hyper-focus [class*="bg-orange-"].text-white,
-.hyper-focus [class*="bg-yellow-"] .text-white,
-.hyper-focus [class*="bg-amber-"] .text-white,
-.hyper-focus [class*="bg-orange-"] .text-white {
-  color: oklch(0.17 0.04 250) !important;
-}
-
-
-/* --------------------------------------------------------------------------
-   9. GOLD TEXT USED WITHOUT A BUBBLE
-
-   Keep standalone gold accents slightly brighter.
-   -------------------------------------------------------------------------- */
-
-.hyper-focus [class*="text-yellow-"],
-.hyper-focus [class*="text-amber-"],
-.hyper-focus [class*="text-orange-"] {
-  color: oklch(0.83 0.13 90) !important;
-}
-
-
-/* --------------------------------------------------------------------------
-   10. SECONDARY SURFACES
-   -------------------------------------------------------------------------- */
 
 .hyper-focus .bg-secondary {
-  background:
-    linear-gradient(
-      145deg,
-      oklch(0.335 0.05 245),
-      oklch(0.275 0.04 255)
-    ) !important;
-
-  color: oklch(0.95 0.01 250) !important;
+  background: var(--focus-secondary);
+  color: var(--secondary-foreground);
 }
-
 
 .hyper-focus .bg-muted {
-  background:
-    linear-gradient(
-      145deg,
-      oklch(0.30 0.04 245),
-      oklch(0.255 0.032 255)
-    ) !important;
+  background: var(--focus-muted);
+  color: var(--muted-foreground);
 }
 
 
-/* --------------------------------------------------------------------------
-   11. PRIMARY BLUE BUTTONS
-   -------------------------------------------------------------------------- */
+/* ==========================================================================
+   PRIMARY BUTTONS
+   ========================================================================== */
 
 .hyper-focus .bg-primary {
-  background:
-    linear-gradient(
-      135deg,
-      oklch(0.70 0.12 235),
-      oklch(0.60 0.115 248)
-    ) !important;
-
-  color: oklch(0.14 0.035 250) !important;
+  background: var(--focus-blue);
+  color: var(--primary-foreground);
 }
 
 
-/* --------------------------------------------------------------------------
-   12. GENERAL TEXT FIXES
-   -------------------------------------------------------------------------- */
+/* ==========================================================================
+   GOLD ACCENTS
+   ========================================================================== */
+
+.hyper-focus .bg-accent {
+  background: var(--focus-gold);
+  color: var(--accent-foreground);
+}
+
+.hyper-focus .text-accent-foreground {
+  color: var(--accent-foreground);
+}
+
+
+/* ==========================================================================
+   CARD / PANEL DEPTH
+   ========================================================================== */
+
+.hyper-focus .bg-card,
+.hyper-focus .bg-popover {
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 5%),
+    0 8px 28px oklch(0.08 0.03 260 / 20%);
+}
+
+
+/* ==========================================================================
+   TEXT
+   ========================================================================== */
 
 .hyper-focus .text-foreground {
-  color: oklch(0.95 0.01 250) !important;
+  color: var(--foreground);
 }
-
 
 .hyper-focus .text-muted-foreground {
-  color: oklch(0.73 0.025 245) !important;
+  color: var(--muted-foreground);
 }
 
 
-/* --------------------------------------------------------------------------
-   13. BORDERS
-   -------------------------------------------------------------------------- */
+/* ==========================================================================
+   BORDERS
+   ========================================================================== */
 
 .hyper-focus .border-border {
-  border-color:
-    oklch(0.48 0.04 245 / 42%) !important;
+  border-color: var(--border);
 }
 
 
-/* --------------------------------------------------------------------------
-   14. INPUTS
-   -------------------------------------------------------------------------- */
+/* ==========================================================================
+   INPUTS
+   ========================================================================== */
 
 .hyper-focus input,
 .hyper-focus textarea,
 .hyper-focus select {
-  background:
-    oklch(0.255 0.04 250) !important;
+  background-color: var(--input);
+  color: var(--foreground);
+  border-color: var(--border);
+}
 
-  color:
-    oklch(0.95 0.01 250) !important;
-
-  border-color:
-    oklch(0.48 0.04 245 / 42%) !important;
+.hyper-focus input::placeholder,
+.hyper-focus textarea::placeholder {
+  color: var(--muted-foreground);
 }
 
 
-/* --------------------------------------------------------------------------
-   15. SMOOTH HOVER EFFECTS
-   -------------------------------------------------------------------------- */
+/* ==========================================================================
+   FOCUS RINGS
+   ========================================================================== */
 
-.hyper-focus .bg-card,
-.hyper-focus .bg-secondary,
-.hyper-focus .bg-muted,
-.hyper-focus .bg-accent,
-.hyper-focus [class*="bg-yellow-"],
-.hyper-focus [class*="bg-amber-"],
-.hyper-focus [class*="bg-orange-"] {
+.hyper-focus input:focus,
+.hyper-focus textarea:focus,
+.hyper-focus select:focus,
+.hyper-focus button:focus-visible {
+  outline-color: var(--ring);
+}
+
+
+/* ==========================================================================
+   TRANSITIONS
+   ========================================================================== */
+
+body,
+.bg-background,
+.bg-card,
+.bg-popover,
+.bg-secondary,
+.bg-muted,
+.bg-accent,
+.bg-primary {
   transition:
+    background-color 180ms ease,
     background 180ms ease,
     color 180ms ease,
     border-color 180ms ease,
     box-shadow 180ms ease;
+}
+
+
+/* ==========================================================================
+   SCROLLBAR
+   ========================================================================== */
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
