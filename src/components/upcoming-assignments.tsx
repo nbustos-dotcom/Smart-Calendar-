@@ -50,10 +50,10 @@ export function UpcomingAssignments({
         {upcoming.map((a) => {
           const chip = (
             <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs">
-              <span className="max-w-[180px] truncate font-medium text-amber-900 dark:text-amber-100">
+              <span className="max-w-[180px] truncate font-medium text-amber-900 dark:text-amber-100 hyper-focus:text-amber-100">
                 {a.title}
               </span>
-              <span className="text-amber-700/80 dark:text-amber-200/70">
+              <span className="text-amber-700/80 dark:text-amber-200/70 hyper-focus:text-amber-200/80">
                 {a.due_at ? formatShortDue(a.due_at) : ""}
               </span>
             </span>
