@@ -162,12 +162,12 @@ function Legend() {
   return (
     <div className="flex items-center gap-4 text-xs text-muted-foreground">
       <span className="flex items-center gap-1.5">
-        <span className="inline-block h-2.5 w-2.5 rounded-sm bg-blue-500" />
-        Class / event
-      </span>
-      <span className="flex items-center gap-1.5">
         <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-500" />
         Assignment due
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-2.5 w-2.5 rounded-sm bg-blue-300" />
+        Class / event
       </span>
     </div>
   );
@@ -373,7 +373,9 @@ function WeekView({
 
                   {clusters.map((cluster) => {
                     const clusterKey = `${day.toISOString()}::${cluster.key}`;
-                    const top = yFor(cluster.startMin);
+                    // Clamp to 0 so an item before the 1 AM start can't spill
+                    // above the grid.
+                    const top = Math.max(0, yFor(cluster.startMin));
 
                     // 3+ overlapping items would be unreadable slivers, so we
                     // collapse them into one block that expands on click.
@@ -397,33 +399,49 @@ function WeekView({
                     // 1 or 2 items: place them side by side, each readable.
                     const lanes = cluster.items.length;
                     return cluster.items.map((b, lane) => {
+                      const blockTop = Math.max(0, yFor(b.startMin));
                       const height = Math.max(
                         MIN_BLOCK_PX,
-                        Math.min(yFor(b.endMin) - top, totalHeight - top)
+                        Math.min(yFor(b.endMin) - blockTop, totalHeight - blockTop)
                       );
                       const widthPct = 100 / lanes;
+                      // Assignments are the focus → bold, saturated amber. Classes
+                      // are supporting context → lighter, quieter blue.
+                      const isAssignment = b.kind === "assignment";
                       return (
                         <div
                           key={b.id}
                           className={cn(
-                            "absolute overflow-hidden rounded-md border-l-2 px-1.5 py-0.5 text-[11px] leading-tight",
-                            b.kind === "event"
-                              ? "border-blue-500 bg-blue-500/10 text-blue-900 dark:text-blue-100"
-                              : "border-amber-500 bg-amber-500/10 text-amber-900 dark:text-amber-100"
+                            "absolute overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] leading-tight",
+                            isAssignment
+                              ? "border-l-4 border-amber-500 bg-amber-500/15 text-amber-950 shadow-sm dark:text-amber-100"
+                              : "border-l-2 border-blue-300 bg-blue-500/5 text-blue-800/80 dark:border-blue-400/40 dark:text-blue-200/70"
                           )}
                           style={{
-                            top: yFor(b.startMin),
+                            top: blockTop,
                             height,
                             left: `calc(${lane * widthPct}% + 2px)`,
                             width: `calc(${widthPct}% - 4px)`,
                           }}
                           title={`${b.title} — ${b.subtitle}`}
                         >
-                          <div className="truncate font-medium">
+                          <div
+                            className={cn(
+                              "truncate",
+                              isAssignment ? "font-semibold" : "font-normal"
+                            )}
+                          >
                             <ItemLink href={b.href}>{b.title}</ItemLink>
                           </div>
                           {height > 34 && (
-                            <div className="truncate text-muted-foreground">
+                            <div
+                              className={cn(
+                                "truncate",
+                                isAssignment
+                                  ? "text-amber-800/80 dark:text-amber-200/70"
+                                  : "text-muted-foreground"
+                              )}
+                            >
                               {b.subtitle}
                             </div>
                           )}
@@ -702,19 +720,22 @@ function isAllDay(e: ClassEventItem): boolean {
   return minutesOfDay(new Date(e.end_at)) === 0;
 }
 
-// Pick the hour range the grid should show, from the actual items (so we don't
-// render a wall of empty early-morning hours). Falls back to a daytime default.
+// The visible hour range. By design the day always starts at 1 AM; the end is
+// stretched to cover the latest item (with a sensible daytime minimum), so we
+// don't render a wall of empty late-night hours when there's nothing there.
+const DAY_START_HOUR = 1;
+
 function hourRange(blocks: GridBlock[]): { minHour: number; maxHour: number } {
-  if (blocks.length === 0) return { minHour: 8, maxHour: 20 };
-  let min = 24 * 60;
+  if (blocks.length === 0) return { minHour: DAY_START_HOUR, maxHour: 21 };
   let max = 0;
   for (const b of blocks) {
-    min = Math.min(min, b.startMin);
     max = Math.max(max, b.endMin);
   }
-  const minHour = Math.max(0, Math.floor(min / 60));
-  const maxHour = Math.min(24, Math.max(minHour + 1, Math.ceil(max / 60)));
-  return { minHour, maxHour };
+  const maxHour = Math.min(
+    24,
+    Math.max(DAY_START_HOUR + 8, Math.ceil(max / 60))
+  );
+  return { minHour: DAY_START_HOUR, maxHour };
 }
 
 // Group blocks that overlap in time into clusters. Blocks in a cluster must

@@ -6,9 +6,12 @@
 // week/month calendar. Display only — no scheduling happens here.
 // ============================================================================
 import Link from "next/link";
+import { CalendarDays } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getConnectionStatus } from "@/lib/canvas-connection";
 import { CalendarView } from "@/components/calendar-view";
+import { TodoPanel } from "@/components/todo-panel";
+import { UpcomingAssignments } from "@/components/upcoming-assignments";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { AssignmentItem, ClassEventItem } from "@/lib/types";
@@ -77,25 +80,35 @@ export default async function HomePage() {
     course_name: r.courses?.name ?? null,
   }));
 
+  // Wide container so the calendar uses most of the window on big screens, with a
+  // comfortable side margin (high max-width avoids over-stretching on ultra-wide).
   return (
-    <main className="mx-auto w-full max-w-5xl p-6">
-      <header className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Smart Calendar</h1>
-          {status.lastSyncedAt ? (
-            <p className="text-sm text-muted-foreground">
-              Last synced {new Date(status.lastSyncedAt).toLocaleString()}
-            </p>
-          ) : (
-            <p className="text-sm text-muted-foreground">Not synced yet</p>
+    <main className="mx-auto w-full max-w-[1800px] px-4 py-4 sm:px-6 lg:px-8">
+      {/* Slim app header: small logo mark + wordmark on the left, actions right. */}
+      <header className="mb-4 flex items-center justify-between gap-4 border-b pb-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <CalendarDays className="size-4" />
+          </span>
+          <span className="text-base font-semibold tracking-tight">
+            Smart Calendar
+          </span>
+          {status.lastSyncedAt && (
+            <span className="hidden truncate text-xs text-muted-foreground sm:inline">
+              · synced{" "}
+              {new Date(status.lastSyncedAt).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+              })}
+            </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button asChild variant="outline">
+        <div className="flex shrink-0 items-center gap-1">
+          <Button asChild variant="ghost" size="sm">
             <Link href="/settings">Settings</Link>
           </Button>
           <form action="/auth/signout" method="post">
-            <Button type="submit" variant="ghost">
+            <Button type="submit" variant="ghost" size="sm">
               Sign out
             </Button>
           </form>
@@ -120,7 +133,17 @@ export default async function HomePage() {
           body="You’re connected, but no assignments or class events have been synced. Try “Sync now” in Settings."
         />
       ) : (
-        <CalendarView assignments={assignments} events={events} />
+        // Main dashboard: assignments-first calendar on the left, To-Do rail on
+        // the right. Stacks vertically on narrow screens (To-Do drops below).
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
+          <div className="flex min-w-0 flex-1 flex-col gap-4">
+            <UpcomingAssignments assignments={assignments} />
+            <CalendarView assignments={assignments} events={events} />
+          </div>
+          <aside className="w-full shrink-0 xl:w-80">
+            <TodoPanel />
+          </aside>
+        </div>
       )}
     </main>
   );
