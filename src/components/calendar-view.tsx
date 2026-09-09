@@ -8,7 +8,7 @@
 // never schedules anything. The date math lives in src/lib/calendar.ts.
 // ============================================================================
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   addDays,
   isSameDay,
@@ -61,12 +61,6 @@ export function CalendarView({
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const today = new Date();
 
-  // Assignments with no due date are shown separately — we never guess a date.
-  const noDueDate = useMemo(
-    () => assignments.filter((a) => !a.due_at),
-    [assignments]
-  );
-
   function move(step: number) {
     setAnchor((prev) => addDays(prev, step * (mode === "week" ? 7 : 30)));
   }
@@ -95,9 +89,6 @@ export function CalendarView({
               year: "numeric",
             })}
           </span>
-        </div>
-        <div className="hidden md:block">
-          <Legend />
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -135,48 +126,6 @@ export function CalendarView({
           />
         )}
       </div>
-
-      {noDueDate.length > 0 && (
-        <section className="shrink-0 rounded-lg border px-3 py-2">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="font-medium">No due date</span>
-            <span className="text-muted-foreground">
-              ({noDueDate.length}) — shown here rather than guessed onto the
-              calendar
-            </span>
-          </div>
-          <div className="mt-1 max-h-16 overflow-y-auto">
-            <ul className="flex flex-wrap gap-x-4 gap-y-0.5">
-              {noDueDate.map((a) => (
-                <li key={a.id} className="text-xs">
-                  <ItemLink href={a.html_url}>{a.title}</ItemLink>
-                  {a.course_name && (
-                    <span className="text-muted-foreground">
-                      {" "}
-                      · {a.course_name}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function Legend() {
-  return (
-    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-500" />
-        Assignment due
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block h-2.5 w-2.5 rounded-sm bg-blue-300" />
-        Class / event
-      </span>
     </div>
   );
 }

@@ -84,7 +84,7 @@ export default async function HomePage() {
   // rest of the viewport, so the whole dashboard fits on one screen (only the
   // calendar grid scrolls internally). Wide, with a comfortable side margin.
   return (
-    <main className="mx-auto flex h-dvh w-full max-w-[1800px] flex-col gap-2.5 px-4 py-2.5 sm:px-6 lg:px-8">
+    <main className="mx-auto flex h-dvh w-full max-w-[1800px] flex-col gap-2.5 bg-gradient-to-b from-background to-muted/60 px-4 py-2.5 sm:px-6 lg:px-8">
       {/* Slim app header: small logo mark + wordmark on the left, actions right. */}
       <header className="flex shrink-0 items-center justify-between gap-4 border-b pb-2">
         <div className="flex min-w-0 items-center gap-2.5">
@@ -143,7 +143,9 @@ export default async function HomePage() {
             <section className="flex min-h-0 min-w-0 flex-1 flex-col">
               <CalendarView assignments={assignments} events={events} />
             </section>
-            <aside className="min-h-0 w-full shrink-0 xl:w-80">
+            {/* Width is controlled by TodoPanel itself (collapsed rail vs full
+                panel); the calendar (flex-1) reclaims the space when collapsed. */}
+            <aside className="min-h-0 w-full shrink-0 xl:w-auto">
               <TodoPanel />
             </aside>
           </div>
