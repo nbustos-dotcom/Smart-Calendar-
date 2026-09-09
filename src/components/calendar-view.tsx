@@ -989,7 +989,9 @@ function WeekView({
                           // dialog; nothing here is editable.
                           onClick={(e) => e.stopPropagation()}
                           className={cn(
-                            "absolute overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] leading-tight",
+                            // Tight horizontal padding so narrow (split) blocks
+                            // fit more characters per line.
+                            "absolute overflow-hidden rounded-md px-1 py-0.5 text-[11px] leading-tight",
                             isAssignment
                               ? "border-l-4 border-amber-500 bg-amber-500/15 text-amber-950 shadow-sm dark:text-amber-100 hyper-focus:bg-amber-500/25 hyper-focus:text-amber-100"
                               : "border-l-2 border-blue-300 bg-blue-500/5 text-blue-800/80 dark:border-blue-400/40 dark:text-blue-200/70 hyper-focus:text-blue-200/80"
@@ -999,7 +1001,10 @@ function WeekView({
                         >
                           <div
                             className={cn(
-                              "truncate",
+                              // Wrap the title over up to 2 lines (clipped to the
+                              // block height) instead of truncating on one line,
+                              // so thin split blocks stay readable.
+                              "line-clamp-2 break-words",
                               isAssignment ? "font-semibold" : "font-normal"
                             )}
                           >
@@ -1030,7 +1035,9 @@ function WeekView({
                         onPointerDown={(e) => startDrag(e, occ, "move")}
                         onClick={(e) => e.stopPropagation()}
                         className={cn(
-                          "group absolute cursor-grab touch-none select-none overflow-hidden rounded-md border-l-4 px-1.5 py-0.5 text-[11px] leading-tight shadow-sm",
+                          // Tight horizontal padding so narrow (split) blocks
+                          // fit more characters per line.
+                          "group absolute cursor-grab touch-none select-none overflow-hidden rounded-md border-l-4 px-1 py-0.5 text-[11px] leading-tight shadow-sm",
                           colorStyle(occ.color).block,
                           isDragging &&
                             "z-40 cursor-grabbing opacity-90 shadow-lg ring-2 ring-foreground/30"
@@ -1038,7 +1045,11 @@ function WeekView({
                         style={{ top: blockTop, height, left, width }}
                         title={`${occ.title} — drag to move, drag the bottom edge to resize`}
                       >
-                        <div className="truncate font-medium">{occ.title}</div>
+                        {/* Wrap the title over up to 2 lines instead of a single
+                            truncated line, so thin split blocks stay readable. */}
+                        <div className="line-clamp-2 break-words font-medium">
+                          {occ.title}
+                        </div>
                         {height > 34 && (
                           <div className="truncate opacity-80">
                             {formatMinutes(item.startMin)}–
