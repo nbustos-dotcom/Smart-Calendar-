@@ -38,11 +38,13 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  /* Darkest tone for the page; card/popover surfaces are lifted a clear step
+     lighter so panels visibly sit ON TOP of the background. */
+  --background: oklch(0.13 0 0);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: oklch(0.225 0 0);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: oklch(0.225 0 0);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
@@ -93,4 +95,14 @@
 body {
   background-color: var(--background);
   color: var(--foreground);
+}
+
+/* Hide the visible scrollbar chrome while keeping scroll functionality.
+   Applied to the scrolling areas (calendar grid, upcoming strip, month view). */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge / IE */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, new Edge */
 }

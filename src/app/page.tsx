@@ -84,7 +84,7 @@ export default async function HomePage() {
   // rest of the viewport, so the whole dashboard fits on one screen (only the
   // calendar grid scrolls internally). Wide, with a comfortable side margin.
   return (
-    <main className="mx-auto flex h-dvh w-full max-w-[1800px] flex-col gap-2.5 bg-gradient-to-b from-white to-zinc-200 px-4 py-2.5 sm:px-6 lg:px-8 dark:from-zinc-950 dark:to-zinc-800">
+    <main className="mx-auto flex h-dvh w-full max-w-[1800px] flex-col gap-2.5 bg-gradient-to-b from-white to-zinc-200 px-4 py-2.5 sm:px-6 lg:px-8 dark:from-black dark:to-zinc-950">
       {/* Slim app header: small logo mark + wordmark on the left, actions right. */}
       <header className="flex shrink-0 items-center justify-between gap-4 border-b pb-2">
         <div className="flex min-w-0 items-center gap-2.5">

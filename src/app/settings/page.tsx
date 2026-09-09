@@ -21,7 +21,7 @@ export default async function SettingsPage() {
   const status = await getConnectionStatus();
 
   return (
-    <main className="mx-auto w-full max-w-2xl p-6">
+    <main className="mx-auto w-full max-w-[1800px] px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Settings</h1>
         <Button asChild variant="ghost">
@@ -29,6 +29,9 @@ export default async function SettingsPage() {
         </Button>
       </div>
 
+      {/* Cards spread across the width on large screens (matches the dashboard's
+          width treatment); they stack on smaller screens. */}
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
       <Card>
         <CardHeader>
           <CardTitle>Connect Canvas</CardTitle>
@@ -42,7 +45,7 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card className="mt-4">
+      <Card>
         <CardHeader>
           <CardTitle>Appearance</CardTitle>
           <CardDescription>
@@ -53,6 +56,7 @@ export default async function SettingsPage() {
           <ThemeToggle />
         </CardContent>
       </Card>
+      </div>
     </main>
   );
 }

@@ -255,18 +255,21 @@ function WeekView({
   }, []);
 
   return (
-    <div className="h-full w-full overflow-x-auto">
-      <div className="flex h-full min-h-[320px] w-full min-w-[720px] flex-col overflow-hidden rounded-lg border">
+    <div className="no-scrollbar h-full w-full overflow-x-auto">
+      <div className="flex h-full min-h-[320px] w-full min-w-[720px] flex-col overflow-hidden rounded-lg border bg-card">
         {/* One vertical scroll container holds BOTH the header and the grid, so
             the scrollbar narrows them by the same amount and the columns stay
             perfectly aligned. The header is sticky so it stays in view. It fills
             the available height and scrolls internally, keeping the dashboard on
             one screen. */}
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          ref={scrollRef}
+          className="no-scrollbar min-h-0 flex-1 overflow-y-auto"
+        >
           {/* Day headers (sticky) */}
           <div
             ref={headerRef}
-            className="sticky top-0 z-20 grid border-b bg-background"
+            className="sticky top-0 z-20 grid border-b bg-card"
             style={{ gridTemplateColumns: gridCols }}
           >
             <div className="border-r" />
@@ -573,7 +576,7 @@ function MonthView({
   const currentMonth = anchor.getMonth();
 
   return (
-    <div className="h-full overflow-auto">
+    <div className="no-scrollbar h-full overflow-auto">
       <div className="min-w-[640px]">
         <div className="grid grid-cols-7 gap-px">
           {WEEKDAY_LABELS.map((label) => (

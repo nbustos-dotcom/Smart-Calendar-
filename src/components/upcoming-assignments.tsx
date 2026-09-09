@@ -46,7 +46,7 @@ export function UpcomingAssignments({
       </span>
 
       {/* One horizontal row; scrolls sideways if there are many. */}
-      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+      <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
         {upcoming.map((a) => {
           const chip = (
             <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs">
