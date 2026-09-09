@@ -17,7 +17,7 @@
 // ============================================================================
 
 import { useEffect, useRef, useState } from "react";
-import { addDays, isSameDay, monthGrid, startOfDay, weekDays } from "@/lib/calendar";
+import { addDays, isSameDay, monthGrid, startOfDay } from "@/lib/calendar";
 import type { AssignmentItem, ClassEventItem } from "@/lib/types";
 import {
   expandOccurrencesForRange,
@@ -542,8 +542,8 @@ function WeekView({
   const headerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
-  // Monday-first order (the shared weekDays() helper is Sunday-first).
-  const days = mondayFirst(weekDays(anchor));
+  // The 7 days Mon..Sun of the week containing the anchor.
+  const days = mondayFirst(anchor);
 
   // Read-only layer: split synced items into timed blocks + all-day events.
   const perDay = days.map((day) => {
@@ -598,7 +598,7 @@ function WeekView({
   // Interactive layer: expand the user's own events into this week's concrete
   // occurrences (single + recurring + per-occurrence overrides).
   const rangeStart = startOfDay(days[0]);
-  const rangeEnd = addDays(startOfDay(days[6]), 1);
+  const rangeEnd = addDays(rangeStart, 7); // full Mon..Sun week (exclusive end)
   const userOccurrences = expandOccurrencesForRange(
     userEvents,
     overrides,
@@ -1383,9 +1383,19 @@ function formatTimeRange(start: string | null, end: string | null): string {
 
 // --- week time-grid helpers (pure) -------------------------------------------
 
-// weekDays() returns Sunday..Saturday; rotate so Monday leads and Sunday trails.
-function mondayFirst(days: Date[]): Date[] {
-  return [...days.slice(1), days[0]];
+// The 7 consecutive days Monday..Sunday of the week containing `anchor`.
+//
+// NOTE: an earlier version rotated weekDays() (which is Sunday-first) into
+// [Mon..Sat, Sun]. That trailing Sunday was the Sunday at the START of the
+// Sunday-first week — i.e. the day BEFORE the Monday, not after it. So the
+// array wasn't chronological: days[6] was the earliest day, which made the
+// Sunday column show the wrong date and (in Phase 2) collapsed the week range
+// to zero width, hiding every user event. We now build the Monday explicitly.
+function mondayFirst(anchor: Date): Date[] {
+  const base = startOfDay(anchor);
+  // Days back to Monday: Sun(0)->6, Mon(1)->0, Tue->1, ... Sat->5.
+  const monday = addDays(base, -((base.getDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
 }
 
 // Minutes since midnight for a local Date (e.g. 9:30am -> 570).
