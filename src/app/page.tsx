@@ -80,12 +80,13 @@ export default async function HomePage() {
     course_name: r.courses?.name ?? null,
   }));
 
-  // Wide container so the calendar uses most of the window on big screens, with a
-  // comfortable side margin (high max-width avoids over-stretching on ultra-wide).
+  // Full-height app shell: header + slim strip + a two-column body that fills the
+  // rest of the viewport, so the whole dashboard fits on one screen (only the
+  // calendar grid scrolls internally). Wide, with a comfortable side margin.
   return (
-    <main className="mx-auto w-full max-w-[1800px] px-4 py-4 sm:px-6 lg:px-8">
+    <main className="mx-auto flex h-dvh w-full max-w-[1800px] flex-col gap-2.5 px-4 py-2.5 sm:px-6 lg:px-8">
       {/* Slim app header: small logo mark + wordmark on the left, actions right. */}
-      <header className="mb-4 flex items-center justify-between gap-4 border-b pb-3">
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b pb-2">
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <CalendarDays className="size-4" />
@@ -133,16 +134,19 @@ export default async function HomePage() {
           body="You’re connected, but no assignments or class events have been synced. Try “Sync now” in Settings."
         />
       ) : (
-        // Main dashboard: assignments-first calendar on the left, To-Do rail on
-        // the right. Stacks vertically on narrow screens (To-Do drops below).
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
-          <div className="flex min-w-0 flex-1 flex-col gap-4">
-            <UpcomingAssignments assignments={assignments} />
-            <CalendarView assignments={assignments} events={events} />
+        // Dashboard body fills the rest of the screen: a slim full-width strip on
+        // top, then two columns (calendar + to-do) whose tops are aligned.
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+          <UpcomingAssignments assignments={assignments} />
+          {/* Two columns, tops level (items-stretch), stacking on narrow screens. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-2.5 xl:flex-row xl:items-stretch">
+            <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <CalendarView assignments={assignments} events={events} />
+            </section>
+            <aside className="min-h-0 w-full shrink-0 xl:w-80">
+              <TodoPanel />
+            </aside>
           </div>
-          <aside className="w-full shrink-0 xl:w-80">
-            <TodoPanel />
-          </aside>
         </div>
       )}
     </main>

@@ -72,9 +72,9 @@ export function CalendarView({
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-2.5">
+      {/* Toolbar — legend sits inline to save a row of vertical space. */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => move(-1)}>
             ← Prev
@@ -89,12 +89,15 @@ export function CalendarView({
           <Button variant="outline" size="sm" onClick={() => move(1)}>
             Next →
           </Button>
-          <span className="ml-2 text-sm font-medium">
+          <span className="ml-1 text-sm font-medium">
             {anchor.toLocaleDateString(undefined, {
               month: "long",
               year: "numeric",
             })}
           </span>
+        </div>
+        <div className="hidden md:block">
+          <Legend />
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -114,44 +117,49 @@ export function CalendarView({
         </div>
       </div>
 
-      <Legend />
-
-      {mode === "week" ? (
-        <WeekView
-          anchor={anchor}
-          today={today}
-          assignments={assignments}
-          events={events}
-        />
-      ) : (
-        <MonthView
-          anchor={anchor}
-          today={today}
-          assignments={assignments}
-          events={events}
-        />
-      )}
+      {/* Calendar fills the remaining height; only its grid scrolls internally. */}
+      <div className="min-h-0 flex-1">
+        {mode === "week" ? (
+          <WeekView
+            anchor={anchor}
+            today={today}
+            assignments={assignments}
+            events={events}
+          />
+        ) : (
+          <MonthView
+            anchor={anchor}
+            today={today}
+            assignments={assignments}
+            events={events}
+          />
+        )}
+      </div>
 
       {noDueDate.length > 0 && (
-        <section className="rounded-lg border p-4">
-          <h3 className="mb-1 font-medium">No due date</h3>
-          <p className="mb-3 text-sm text-muted-foreground">
-            Canvas didn’t give these a due date, so they don’t appear on the
-            calendar. We show them here rather than guessing when they’re due.
-          </p>
-          <ul className="flex flex-col gap-1">
-            {noDueDate.map((a) => (
-              <li key={a.id} className="text-sm">
-                <ItemLink href={a.html_url}>{a.title}</ItemLink>
-                {a.course_name && (
-                  <span className="text-muted-foreground">
-                    {" "}
-                    · {a.course_name}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
+        <section className="shrink-0 rounded-lg border px-3 py-2">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="font-medium">No due date</span>
+            <span className="text-muted-foreground">
+              ({noDueDate.length}) — shown here rather than guessed onto the
+              calendar
+            </span>
+          </div>
+          <div className="mt-1 max-h-16 overflow-y-auto">
+            <ul className="flex flex-wrap gap-x-4 gap-y-0.5">
+              {noDueDate.map((a) => (
+                <li key={a.id} className="text-xs">
+                  <ItemLink href={a.html_url}>{a.title}</ItemLink>
+                  {a.course_name && (
+                    <span className="text-muted-foreground">
+                      {" "}
+                      · {a.course_name}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
         </section>
       )}
     </div>
@@ -261,12 +269,14 @@ function WeekView({
   const yFor = (min: number) => ((min - minHour * 60) / 60) * HOUR_PX;
 
   return (
-    <div className="w-full overflow-x-auto">
-      <div className="w-full min-w-[720px] overflow-hidden rounded-lg border">
+    <div className="h-full w-full overflow-x-auto">
+      <div className="flex h-full min-h-[320px] w-full min-w-[720px] flex-col overflow-hidden rounded-lg border">
         {/* One vertical scroll container holds BOTH the header and the grid, so
             the scrollbar narrows them by the same amount and the columns stay
-            perfectly aligned. The header is sticky so it stays in view. */}
-        <div className="max-h-[72vh] overflow-y-auto">
+            perfectly aligned. The header is sticky so it stays in view. It fills
+            the available height and scrolls internally, keeping the dashboard on
+            one screen. */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {/* Day headers (sticky) */}
           <div
             className="sticky top-0 z-20 grid border-b bg-background"
@@ -575,7 +585,7 @@ function MonthView({
   const currentMonth = anchor.getMonth();
 
   return (
-    <div className="overflow-x-auto">
+    <div className="h-full overflow-auto">
       <div className="min-w-[640px]">
         <div className="grid grid-cols-7 gap-px">
           {WEEKDAY_LABELS.map((label) => (
