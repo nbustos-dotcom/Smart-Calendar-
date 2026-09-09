@@ -24,13 +24,24 @@ export const metadata: Metadata = {
     "A deterministic study calendar that reads your Canvas deadlines (read-only).",
 };
 
+// Runs before the page paints: applies the saved theme (or the OS preference if
+// none saved) by toggling the `dark` class on <html>, so there's no flash of the
+// wrong theme. Theme is stored per-browser in localStorage — no backend.
+const themeScript = `(function(){try{var t=localStorage.getItem('theme');var dark=t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches);var el=document.documentElement;if(dark)el.classList.add('dark');else el.classList.remove('dark');}catch(e){}})();`;
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
+      // The theme script mutates the class list before React hydrates, so tell
+      // React not to warn about the resulting mismatch on <html>.
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        {children}
+      </body>
     </html>
   );
 }

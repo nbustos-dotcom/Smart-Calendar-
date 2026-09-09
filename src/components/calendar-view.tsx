@@ -8,7 +8,7 @@
 // never schedules anything. The date math lives in src/lib/calendar.ts.
 // ============================================================================
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   addDays,
   isSameDay,
@@ -151,6 +151,12 @@ function WeekView({
   // Which collapsed overlap-cluster (if any) is currently expanded.
   const [openCluster, setOpenCluster] = useState<string | null>(null);
 
+  // Refs used to auto-scroll the grid to the user's day on load (see effect
+  // below). All hours still exist; this only sets the initial scroll position.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+
   // Monday-first order. The shared weekDays() helper is Sunday-first (and the
   // month view relies on that), so we reorder locally instead of changing it.
   const days = mondayFirst(weekDays(anchor));
@@ -217,6 +223,37 @@ function WeekView({
   // Convert minutes-from-midnight into a vertical pixel offset on the grid.
   const yFor = (min: number) => ((min - minHour * 60) / 60) * HOUR_PX;
 
+  // On load, scroll so the view starts ~1 hour before today's earliest item
+  // (or 8 AM if the day is empty). Every hour from 1 AM still exists; the user
+  // can scroll up. Runs once on mount.
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const grid = gridRef.current;
+    if (!scroller || !grid) return;
+
+    const todayCol = perDay.find((d) => isSameDay(d.day, today));
+    const earliest =
+      todayCol && todayCol.timed.length > 0
+        ? Math.min(...todayCol.timed.map((b) => b.startMin))
+        : null;
+    const targetHour =
+      earliest != null
+        ? Math.min(maxHour - 1, Math.max(minHour, Math.floor(earliest / 60) - 1))
+        : 8;
+
+    // Content-y of the target hour within the scroll container, then nudge up by
+    // the sticky header so the target hour sits just beneath it.
+    const gridTopInScroll =
+      grid.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top +
+      scroller.scrollTop;
+    const headerH = headerRef.current?.offsetHeight ?? 0;
+    const targetY = gridTopInScroll + GRID_PAD_TOP + yFor(targetHour * 60);
+    scroller.scrollTop = Math.max(0, targetY - headerH - 8);
+    // Mount-only: this is the initial scroll position on load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="h-full w-full overflow-x-auto">
       <div className="flex h-full min-h-[320px] w-full min-w-[720px] flex-col overflow-hidden rounded-lg border">
@@ -225,9 +262,10 @@ function WeekView({
             perfectly aligned. The header is sticky so it stays in view. It fills
             the available height and scrolls internally, keeping the dashboard on
             one screen. */}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
           {/* Day headers (sticky) */}
           <div
+            ref={headerRef}
             className="sticky top-0 z-20 grid border-b bg-background"
             style={{ gridTemplateColumns: gridCols }}
           >
@@ -290,6 +328,7 @@ function WeekView({
 
           {/* Time grid */}
           <div
+            ref={gridRef}
             className="grid"
             style={{
               gridTemplateColumns: gridCols,

@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { getConnectionStatus } from "@/lib/canvas-connection";
 import { SettingsForm } from "@/components/settings-form";
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Card,
   CardContent,
@@ -38,6 +39,18 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent>
           <SettingsForm status={status} />
+        </CardContent>
+      </Card>
+
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>Appearance</CardTitle>
+          <CardDescription>
+            Personalize how Smart Calendar looks on this device.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ThemeToggle />
         </CardContent>
       </Card>
     </main>
