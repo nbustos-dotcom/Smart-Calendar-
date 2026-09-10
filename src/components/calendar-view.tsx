@@ -583,8 +583,11 @@ function WeekView({
   }, []);
 
   useEffect(() => {
-    const root = scrollRef.current;
-    if (!root || typeof IntersectionObserver === "undefined") return;
+    if (typeof IntersectionObserver === "undefined") return;
+    // Root the observer on whatever ACTUALLY scrolls (nearest scrollable
+    // ancestor of the grid); null means the page/viewport scrolls. This matches
+    // the element the sticky markers pin to, so detection and pinning agree.
+    const root = findScrollParent(gridRef.current);
     const obs = new IntersectionObserver(
       (entries) => {
         setBelowKeys((prev) => {
@@ -615,8 +618,8 @@ function WeekView({
     );
     observerRef.current = obs;
     // Assignment blocks already in the DOM (their ref ran before this effect).
-    root
-      .querySelectorAll("[data-below-key]")
+    gridRef.current
+      ?.querySelectorAll("[data-below-key]")
       .forEach((el) => obs.observe(el));
     return () => {
       obs.disconnect();
@@ -1030,8 +1033,12 @@ function WeekView({
                 <div
                   key={day.toISOString()}
                   onClick={(e) => handleColumnClick(e, day)}
+                  // flex-col lets the sticky "due below" marker sit at the
+                  // BOTTOM of the column (via mt-auto) so `position: sticky`
+                  // engages. The event/assignment blocks are position:absolute,
+                  // so flex does not affect their layout.
                   className={cn(
-                    "relative border-r last:border-r-0",
+                    "relative flex flex-col border-r last:border-r-0",
                     isToday && "bg-primary/5"
                   )}
                   style={{
@@ -1156,7 +1163,10 @@ function WeekView({
                   {belowHere.length > 0 && (
                     <div
                       onClick={(e) => e.stopPropagation()}
-                      className="sticky bottom-1 z-20 mx-0.5 flex flex-col gap-0.5"
+                      // mt-auto drops this to the column bottom (its natural flow
+                      // position) so `position: sticky; bottom` pins it to the
+                      // scroller's bottom edge as the user scrolls.
+                      className="sticky bottom-1 z-20 mx-0.5 mt-auto flex flex-col gap-0.5"
                     >
                       {belowHere.map((b) => (
                         <a
@@ -1402,6 +1412,24 @@ function mondayFirst(anchor: Date): Date[] {
   // Days back to Monday: Sun(0)->6, Mon(1)->0, Tue->1, ... Sat->5.
   const monday = addDays(base, -((base.getDay() + 6) % 7));
   return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+}
+
+// The nearest ancestor of `el` that actually scrolls vertically, or null when
+// the page/viewport is what scrolls. Used as the IntersectionObserver root so
+// off-screen detection is measured against the real scroll container.
+function findScrollParent(el: Element | null): Element | null {
+  let node: Element | null = el?.parentElement ?? null;
+  while (node) {
+    const oy = getComputedStyle(node).overflowY;
+    if (
+      (oy === "auto" || oy === "scroll") &&
+      node.scrollHeight > node.clientHeight
+    ) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
 }
 
 // Minutes since midnight for a local Date (e.g. 9:30am -> 570).
