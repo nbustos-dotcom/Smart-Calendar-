@@ -16,7 +16,7 @@
 // so edits feel instant; on a failed save we revert that copy.
 // ============================================================================
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { addDays, isSameDay, monthGrid, startOfDay } from "@/lib/calendar";
 import type { AssignmentItem, ClassEventItem } from "@/lib/types";
 import {
@@ -554,6 +554,76 @@ function WeekView({
   const headerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
+  // --- Sticky "due below" markers ---------------------------------------------
+  // Assignments due late in the day sit at the bottom of their column and scroll
+  // off-screen when the user is scrolled up. An IntersectionObserver (root = the
+  // vertical scroller) tells us deterministically which assignment blocks are
+  // currently BELOW the viewport; each such day column then shows a compact
+  // sticky marker pinned to its bottom. No polling.
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const [belowKeys, setBelowKeys] = useState<Set<string>>(() => new Set());
+
+  // Stable ref for every assignment block: observe on mount, clean up on unmount
+  // (React 19 ref cleanup). The block carries its key in a data attribute so the
+  // observer callback can identify it.
+  const assignmentRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    observerRef.current?.observe(el);
+    return () => {
+      observerRef.current?.unobserve(el);
+      const key = el.dataset.belowKey;
+      if (!key) return;
+      setBelowKeys((prev) => {
+        if (!prev.has(key)) return prev;
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        setBelowKeys((prev) => {
+          const next = new Set(prev);
+          let changed = false;
+          for (const e of entries) {
+            const key = (e.target as HTMLElement).dataset.belowKey;
+            if (!key) continue;
+            const rb = e.rootBounds;
+            // Off-screen BELOW = not visible AND its top is at/under the
+            // scroller's bottom edge. Scrolled-ABOVE stays unpinned.
+            const below =
+              !e.isIntersecting &&
+              rb != null &&
+              e.boundingClientRect.top >= rb.bottom - 1;
+            if (below && !next.has(key)) {
+              next.add(key);
+              changed = true;
+            } else if (!below && next.has(key)) {
+              next.delete(key);
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      },
+      { root, threshold: 0 }
+    );
+    observerRef.current = obs;
+    // Assignment blocks already in the DOM (their ref ran before this effect).
+    root
+      .querySelectorAll("[data-below-key]")
+      .forEach((el) => obs.observe(el));
+    return () => {
+      obs.disconnect();
+      observerRef.current = null;
+    };
+  }, []);
+
   // The 7 days Mon..Sun of the week containing the anchor.
   const days = mondayFirst(anchor);
 
@@ -946,6 +1016,16 @@ function WeekView({
                 ),
               ]);
 
+              // Assignment blocks in THIS column currently scrolled off-screen
+              // below the viewport (see the IntersectionObserver above).
+              const belowHere = placed.flatMap((p) =>
+                p.layer === "readonly" &&
+                p.block.kind === "assignment" &&
+                belowKeys.has(p.key)
+                  ? [p.block]
+                  : []
+              );
+
               return (
                 <div
                   key={day.toISOString()}
@@ -985,6 +1065,10 @@ function WeekView({
                       return (
                         <div
                           key={item.key}
+                          // Observe assignment blocks so we can show a sticky
+                          // marker when one is scrolled off-screen below.
+                          ref={isAssignment ? assignmentRef : undefined}
+                          data-below-key={isAssignment ? item.key : undefined}
                           // Swallow the click so it doesn't open the "new event"
                           // dialog; nothing here is editable.
                           onClick={(e) => e.stopPropagation()}
@@ -1064,6 +1148,41 @@ function WeekView({
                       </div>
                     );
                   })}
+
+                  {/* Sticky markers: assignments in this column whose real block
+                      is scrolled off-screen below. Pinned to the bottom of the
+                      day's visible area; they vanish once the block scrolls into
+                      view. Theme-token styling only (bg-popover / border / …). */}
+                  {belowHere.length > 0 && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="sticky bottom-1 z-20 mx-0.5 flex flex-col gap-0.5"
+                    >
+                      {belowHere.map((b) => (
+                        <a
+                          key={b.id}
+                          href={b.href ?? undefined}
+                          target={b.href ? "_blank" : undefined}
+                          rel={b.href ? "noopener noreferrer" : undefined}
+                          title={`${b.title} — due ${formatMinutes(
+                            b.startMin
+                          )} (below)`}
+                          className="flex items-center gap-1 overflow-hidden rounded-md border bg-popover px-1.5 py-0.5 text-[10px] leading-tight text-popover-foreground shadow-md"
+                        >
+                          <span
+                            aria-hidden
+                            className="shrink-0 text-muted-foreground"
+                          >
+                            ↓
+                          </span>
+                          <span className="truncate font-medium">{b.title}</span>
+                          <span className="ml-auto shrink-0 whitespace-nowrap text-muted-foreground">
+                            {formatMinutes(b.startMin)}
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
