@@ -12,7 +12,6 @@ import { getConnectionStatus } from "@/lib/canvas-connection";
 import { CalendarView } from "@/components/calendar-view";
 import { TodoPanel } from "@/components/todo-panel";
 import { DueTodayBubble } from "@/components/due-today-bubble";
-import { UpcomingAssignments } from "@/components/upcoming-assignments";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { AssignmentItem, ClassEventItem } from "@/lib/types";
@@ -148,10 +147,9 @@ export default async function HomePage() {
           body="You’re connected, but no assignments or class events have been synced. Try “Sync now” in Settings."
         />
       ) : (
-        // Dashboard body fills the rest of the screen: a slim full-width strip on
-        // top, then two columns (calendar + to-do) whose tops are aligned.
+        // Dashboard body fills the rest of the screen: two columns
+        // (calendar + to-do) whose tops are aligned.
         <div className="flex min-h-0 flex-1 flex-col gap-2.5">
-          <UpcomingAssignments assignments={assignments} />
           {/* Two columns, tops level (items-stretch), stacking on narrow screens. */}
           <div className="flex min-h-0 flex-1 flex-col gap-2.5 xl:flex-row xl:items-stretch">
             <section className="flex min-h-0 min-w-0 flex-1 flex-col">

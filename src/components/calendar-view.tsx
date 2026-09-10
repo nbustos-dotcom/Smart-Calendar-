@@ -16,7 +16,7 @@
 // so edits feel instant; on a failed save we revert that copy.
 // ============================================================================
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { addDays, isSameDay, monthGrid, startOfDay } from "@/lib/calendar";
 import type { AssignmentItem, ClassEventItem } from "@/lib/types";
 import {
@@ -29,6 +29,7 @@ import {
 } from "@/lib/recurrence";
 import { colorStyle, type EventColor } from "@/lib/event-colors";
 import { layoutOverlaps } from "@/lib/overlap-layout";
+import { DayDueDropdown } from "@/components/day-due-dropdown";
 import {
   EventDialog,
   type EditTarget,
@@ -554,79 +555,6 @@ function WeekView({
   const headerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
-  // --- Sticky "due below" markers ---------------------------------------------
-  // Assignments due late in the day sit at the bottom of their column and scroll
-  // off-screen when the user is scrolled up. An IntersectionObserver (root = the
-  // vertical scroller) tells us deterministically which assignment blocks are
-  // currently BELOW the viewport; each such day column then shows a compact
-  // sticky marker pinned to its bottom. No polling.
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const [belowKeys, setBelowKeys] = useState<Set<string>>(() => new Set());
-
-  // Stable ref for every assignment block: observe on mount, clean up on unmount
-  // (React 19 ref cleanup). The block carries its key in a data attribute so the
-  // observer callback can identify it.
-  const assignmentRef = useCallback((el: HTMLDivElement | null) => {
-    if (!el) return;
-    observerRef.current?.observe(el);
-    return () => {
-      observerRef.current?.unobserve(el);
-      const key = el.dataset.belowKey;
-      if (!key) return;
-      setBelowKeys((prev) => {
-        if (!prev.has(key)) return prev;
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") return;
-    // Root the observer on whatever ACTUALLY scrolls (nearest scrollable
-    // ancestor of the grid); null means the page/viewport scrolls. This matches
-    // the element the sticky markers pin to, so detection and pinning agree.
-    const root = findScrollParent(gridRef.current);
-    const obs = new IntersectionObserver(
-      (entries) => {
-        setBelowKeys((prev) => {
-          const next = new Set(prev);
-          let changed = false;
-          for (const e of entries) {
-            const key = (e.target as HTMLElement).dataset.belowKey;
-            if (!key) continue;
-            const rb = e.rootBounds;
-            // Off-screen BELOW = not visible AND its top is at/under the
-            // scroller's bottom edge. Scrolled-ABOVE stays unpinned.
-            const below =
-              !e.isIntersecting &&
-              rb != null &&
-              e.boundingClientRect.top >= rb.bottom - 1;
-            if (below && !next.has(key)) {
-              next.add(key);
-              changed = true;
-            } else if (!below && next.has(key)) {
-              next.delete(key);
-              changed = true;
-            }
-          }
-          return changed ? next : prev;
-        });
-      },
-      { root, threshold: 0 }
-    );
-    observerRef.current = obs;
-    // Assignment blocks already in the DOM (their ref ran before this effect).
-    gridRef.current
-      ?.querySelectorAll("[data-below-key]")
-      .forEach((el) => obs.observe(el));
-    return () => {
-      obs.disconnect();
-      observerRef.current = null;
-    };
-  }, []);
-
   // The 7 days Mon..Sun of the week containing the anchor.
   const days = mondayFirst(anchor);
 
@@ -905,13 +833,26 @@ function WeekView({
             style={{ gridTemplateColumns: gridCols }}
           >
             <div className="border-r" />
-            {days.map((day) => {
+            {days.map((day, dayIdx) => {
               const isToday = isSameDay(day, today);
+              // This day's Canvas assignments, earliest first (deterministic).
+              const dayDue = assignments
+                .filter((a) => a.due_at && isSameDay(new Date(a.due_at), day))
+                .sort(
+                  (a, b) =>
+                    new Date(a.due_at!).getTime() - new Date(b.due_at!).getTime()
+                )
+                .map((a) => ({
+                  id: a.id,
+                  title: a.title,
+                  href: a.html_url,
+                  at: a.due_at!,
+                }));
               return (
                 <div
                   key={day.toISOString()}
                   className={cn(
-                    "border-r px-2 py-1.5 text-center last:border-r-0",
+                    "relative border-r px-2 py-1.5 text-center last:border-r-0",
                     isToday && "bg-primary/5"
                   )}
                 >
@@ -926,6 +867,10 @@ function WeekView({
                   >
                     {day.getDate()}
                   </div>
+                  <DayDueDropdown
+                    items={dayDue}
+                    align={dayIdx === days.length - 1 ? "end" : "center"}
+                  />
                 </div>
               );
             })}
@@ -1019,26 +964,12 @@ function WeekView({
                 ),
               ]);
 
-              // Assignment blocks in THIS column currently scrolled off-screen
-              // below the viewport (see the IntersectionObserver above).
-              const belowHere = placed.flatMap((p) =>
-                p.layer === "readonly" &&
-                p.block.kind === "assignment" &&
-                belowKeys.has(p.key)
-                  ? [p.block]
-                  : []
-              );
-
               return (
                 <div
                   key={day.toISOString()}
                   onClick={(e) => handleColumnClick(e, day)}
-                  // flex-col lets the sticky "due below" marker sit at the
-                  // BOTTOM of the column (via mt-auto) so `position: sticky`
-                  // engages. The event/assignment blocks are position:absolute,
-                  // so flex does not affect their layout.
                   className={cn(
-                    "relative flex flex-col border-r last:border-r-0",
+                    "relative border-r last:border-r-0",
                     isToday && "bg-primary/5"
                   )}
                   style={{
@@ -1072,10 +1003,6 @@ function WeekView({
                       return (
                         <div
                           key={item.key}
-                          // Observe assignment blocks so we can show a sticky
-                          // marker when one is scrolled off-screen below.
-                          ref={isAssignment ? assignmentRef : undefined}
-                          data-below-key={isAssignment ? item.key : undefined}
                           // Swallow the click so it doesn't open the "new event"
                           // dialog; nothing here is editable.
                           onClick={(e) => e.stopPropagation()}
@@ -1155,44 +1082,6 @@ function WeekView({
                       </div>
                     );
                   })}
-
-                  {/* Sticky markers: assignments in this column whose real block
-                      is scrolled off-screen below. Pinned to the bottom of the
-                      day's visible area; they vanish once the block scrolls into
-                      view. Theme-token styling only (bg-popover / border / …). */}
-                  {belowHere.length > 0 && (
-                    <div
-                      onClick={(e) => e.stopPropagation()}
-                      // mt-auto drops this to the column bottom (its natural flow
-                      // position) so `position: sticky; bottom` pins it to the
-                      // scroller's bottom edge as the user scrolls.
-                      className="sticky bottom-1 z-20 mx-0.5 mt-auto flex flex-col gap-0.5"
-                    >
-                      {belowHere.map((b) => (
-                        <a
-                          key={b.id}
-                          href={b.href ?? undefined}
-                          target={b.href ? "_blank" : undefined}
-                          rel={b.href ? "noopener noreferrer" : undefined}
-                          title={`${b.title} — due ${formatMinutes(
-                            b.startMin
-                          )} (below)`}
-                          className="flex items-center gap-1 overflow-hidden rounded-md border bg-popover px-1.5 py-0.5 text-[10px] leading-tight text-popover-foreground shadow-md"
-                        >
-                          <span
-                            aria-hidden
-                            className="shrink-0 text-muted-foreground"
-                          >
-                            ↓
-                          </span>
-                          <span className="truncate font-medium">{b.title}</span>
-                          <span className="ml-auto shrink-0 whitespace-nowrap text-muted-foreground">
-                            {formatMinutes(b.startMin)}
-                          </span>
-                        </a>
-                      ))}
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -1412,24 +1301,6 @@ function mondayFirst(anchor: Date): Date[] {
   // Days back to Monday: Sun(0)->6, Mon(1)->0, Tue->1, ... Sat->5.
   const monday = addDays(base, -((base.getDay() + 6) % 7));
   return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
-}
-
-// The nearest ancestor of `el` that actually scrolls vertically, or null when
-// the page/viewport is what scrolls. Used as the IntersectionObserver root so
-// off-screen detection is measured against the real scroll container.
-function findScrollParent(el: Element | null): Element | null {
-  let node: Element | null = el?.parentElement ?? null;
-  while (node) {
-    const oy = getComputedStyle(node).overflowY;
-    if (
-      (oy === "auto" || oy === "scroll") &&
-      node.scrollHeight > node.clientHeight
-    ) {
-      return node;
-    }
-    node = node.parentElement;
-  }
-  return null;
 }
 
 // Minutes since midnight for a local Date (e.g. 9:30am -> 570).
