@@ -26,10 +26,11 @@ async function requireUser() {
 
 // --- Manual to-do items -----------------------------------------------------
 
-// Add a manual item to a given day (YYYY-MM-DD).
+// Add a manual item to a given day (YYYY-MM-DD), with an optional "HH:MM" time.
 export async function addTodoItemAction(
   day: string,
-  text: string
+  text: string,
+  time: string | null = null
 ): Promise<TodoActionResult> {
   const { supabase, user } = await requireUser();
   if (!user) return { ok: false, error: "Not signed in." };
@@ -39,10 +40,15 @@ export async function addTodoItemAction(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
     return { ok: false, error: "Invalid day." };
   }
+  // Time is optional; when present it must be a 24h HH:MM. Blank → no time.
+  const cleanTime = time && time.trim() ? time.trim() : null;
+  if (cleanTime && !/^\d{2}:\d{2}$/.test(cleanTime)) {
+    return { ok: false, error: "Invalid time." };
+  }
 
   const { data, error } = await supabase
     .from("todo_items")
-    .insert({ user_id: user.id, day, text: trimmed, done: false })
+    .insert({ user_id: user.id, day, text: trimmed, time: cleanTime, done: false })
     .select("id")
     .single();
 

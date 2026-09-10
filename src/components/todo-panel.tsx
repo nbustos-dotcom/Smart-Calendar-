@@ -42,6 +42,14 @@ function formatTime(iso: string): string {
   });
 }
 
+// "HH:MM" (24h) -> friendly local time, e.g. "9:00 AM".
+function formatHHMM(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
 function tempId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `tmp-${crypto.randomUUID()}`;
@@ -68,6 +76,7 @@ export function TodoPanel({
     () => new Set(doneAssignmentIds)
   );
   const [draft, setDraft] = useState("");
+  const [draftTime, setDraftTime] = useState(""); // optional "HH:MM", blank = none
   const [error, setError] = useState<string | null>(null);
 
   const today = new Date();
@@ -79,7 +88,16 @@ export function TodoPanel({
     .sort(
       (a, b) => new Date(a.due_at!).getTime() - new Date(b.due_at!).getTime()
     );
-  const dayItems = items.filter((i) => i.day === dayKey);
+  // Manual items for this day: timed ones first (sorted by time), untimed below.
+  // Zero-padded "HH:MM" sorts chronologically as plain strings.
+  const dayItems = items
+    .filter((i) => i.day === dayKey)
+    .sort((a, b) => {
+      if (a.time && b.time) return a.time.localeCompare(b.time);
+      if (a.time) return -1;
+      if (b.time) return 1;
+      return 0; // both untimed → keep insertion order (stable sort)
+    });
 
   // --- mutations (optimistic + revert on failure) ----------------------------
 
@@ -124,11 +142,13 @@ export function TodoPanel({
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
+    const time = draftTime.trim() || null;
     setDraft("");
+    setDraftTime("");
     const id = tempId();
-    setItems((list) => [...list, { id, day: dayKey, text, done: false }]);
+    setItems((list) => [...list, { id, day: dayKey, text, time, done: false }]);
 
-    const res = await addTodoItemAction(dayKey, text);
+    const res = await addTodoItemAction(dayKey, text, time);
     if (!res.ok) {
       setItems((list) => list.filter((i) => i.id !== id));
       setError("Couldn’t add that item — nothing was saved.");
@@ -292,14 +312,21 @@ export function TodoPanel({
                   onChange={() => toggleItem(i.id, !i.done)}
                   label={i.text}
                 />
-                <p
-                  className={cn(
-                    "min-w-0 flex-1 break-words text-sm",
-                    i.done && "text-muted-foreground line-through"
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={cn(
+                      "break-words text-sm",
+                      i.done && "text-muted-foreground line-through"
+                    )}
+                  >
+                    {i.text}
+                  </p>
+                  {i.time && (
+                    <p className="text-xs text-muted-foreground">
+                      {formatHHMM(i.time)}
+                    </p>
                   )}
-                >
-                  {i.text}
-                </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => removeItem(i.id)}
@@ -314,13 +341,21 @@ export function TodoPanel({
         )}
       </div>
 
-      {/* Add a manual item to the selected day */}
-      <form onSubmit={addItem} className="flex gap-2 border-t p-2">
+      {/* Add a manual item (with an optional time) to the selected day */}
+      <form onSubmit={addItem} className="flex flex-wrap gap-2 border-t p-2">
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Add a to-do…"
           className="min-w-0 flex-1 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        />
+        <input
+          type="time"
+          value={draftTime}
+          onChange={(e) => setDraftTime(e.target.value)}
+          aria-label="Optional time"
+          title="Optional time"
+          className="w-[104px] shrink-0 rounded-md border border-input bg-transparent px-2 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
         />
         <button
           type="submit"

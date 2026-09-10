@@ -12,6 +12,7 @@ export type TodoItemRow = {
   id: string;
   day: string; // YYYY-MM-DD (local calendar day)
   text: string;
+  time: string | null; // optional "HH:MM" (24h); null = no time
   done: boolean;
 };
 
@@ -20,12 +21,13 @@ export async function listTodoItems(): Promise<TodoItemRow[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("todo_items")
-    .select("id, day, text, done")
+    .select("id, day, text, time, done")
     .order("created_at", { ascending: true });
   return (data ?? []).map((r) => ({
     id: r.id,
     day: r.day,
     text: r.text,
+    time: r.time ?? null,
     done: r.done,
   }));
 }
