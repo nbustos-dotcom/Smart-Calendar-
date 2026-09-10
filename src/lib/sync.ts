@@ -22,6 +22,7 @@ import {
   mapAssignment,
   mapClassEvent,
 } from "@/lib/canvas-parse";
+import { getHiddenCanvasCourseIds } from "@/lib/courses";
 
 export type SyncResult =
   | { ok: true; courses: number; assignments: number; events: number }
@@ -65,7 +66,14 @@ export async function syncCanvas(): Promise<SyncResult> {
     for (const row of savedCourses ?? []) {
       courseIdByCanvasId.set(row.canvas_course_id, row.id);
     }
-    const canvasCourseIds = [...courseIdByCanvasId.keys()];
+
+    // Courses the user has REMOVED are skipped here, so their assignments and
+    // events never get re-inserted on a sync. (The course row itself stays, so
+    // Settings can still show the removed course by name and offer "Re-add".)
+    const hiddenCourseIds = await getHiddenCanvasCourseIds();
+    const canvasCourseIds = [...courseIdByCanvasId.keys()].filter(
+      (id) => !hiddenCourseIds.has(id)
+    );
 
     // 2) Assignments (per course) ------------------------------------------
     let assignmentCount = 0;

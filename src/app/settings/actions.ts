@@ -16,6 +16,7 @@ import {
 } from "@/lib/canvas-connection";
 import { getSelf } from "@/lib/canvas";
 import { syncCanvas } from "@/lib/sync";
+import { hideCourse, unhideCourse } from "@/lib/courses";
 
 export type ActionState = { ok: boolean; message: string } | null;
 
@@ -65,4 +66,45 @@ export async function syncNowAction(): Promise<ActionState> {
     };
   }
   return { ok: false, message: result.error };
+}
+
+// Remove a course: delete its assignments/events and suppress it so the next
+// sync won't re-pull it.
+export async function removeCourseAction(
+  canvasCourseId: number
+): Promise<ActionState> {
+  try {
+    await hideCourse(canvasCourseId);
+    revalidatePath("/settings");
+    revalidatePath("/");
+    return {
+      ok: true,
+      message: "Course removed. Its assignments won’t come back on the next sync.",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "Could not remove the course.",
+    };
+  }
+}
+
+// Re-add a previously removed course. The next sync repulls its assignments.
+export async function readdCourseAction(
+  canvasCourseId: number
+): Promise<ActionState> {
+  try {
+    await unhideCourse(canvasCourseId);
+    revalidatePath("/settings");
+    revalidatePath("/");
+    return {
+      ok: true,
+      message: "Course re-added. Sync now to pull its assignments back.",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "Could not re-add the course.",
+    };
+  }
 }

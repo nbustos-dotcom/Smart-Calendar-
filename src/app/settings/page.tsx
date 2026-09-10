@@ -6,7 +6,9 @@
 // ============================================================================
 import Link from "next/link";
 import { getConnectionStatus } from "@/lib/canvas-connection";
+import { listSettingsCourses } from "@/lib/courses";
 import { SettingsForm } from "@/components/settings-form";
+import { CourseManager } from "@/components/course-manager";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Card,
@@ -19,6 +21,10 @@ import { Button } from "@/components/ui/button";
 
 export default async function SettingsPage() {
   const status = await getConnectionStatus();
+  // Only meaningful once connected; skip the query otherwise.
+  const { active, removed } = status.connected
+    ? await listSettingsCourses()
+    : { active: [], removed: [] };
 
   return (
     <main className="mx-auto w-full max-w-[1800px] px-4 py-6 sm:px-6 lg:px-8">
@@ -44,6 +50,21 @@ export default async function SettingsPage() {
           <SettingsForm status={status} />
         </CardContent>
       </Card>
+
+      {status.connected && (
+        <Card>
+          <CardHeader>
+            <CardTitle>My Courses</CardTitle>
+            <CardDescription>
+              Remove a course to delete its assignments and keep them from
+              coming back on the next sync. Re-add it any time.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CourseManager active={active} removed={removed} />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
