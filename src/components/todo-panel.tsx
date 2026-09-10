@@ -1,26 +1,148 @@
 // ============================================================================
-// TO-DO PANEL — static placeholder with a collapse/expand toggle (right rail)
+// TO-DO PANEL — a working, day-scoped to-do list (right rail)
 //
-// VISUAL ONLY: sample rows, no real data or task logic yet. The only behavior is
-// a local open/closed toggle (pure UI state): it starts COLLAPSED as a slim rail
-// so the calendar gets the full width, and expands to the full panel on click.
+// For the selected day it shows:
+//   * that day's Canvas assignments as checkable rows (read from the assignment
+//     data the dashboard already loaded — filtered by same local day, never
+//     copied into a table). Ticking one writes assignment_done, so the read-only
+//     assignment snapshot is never mutated.
+//   * the user's own manual to-do items for that day (add / remove / check off).
+//
+// Prev/next day navigation moves the selected day. All state is per-user and
+// persisted via the server actions in src/app/todo/actions.ts. Optimistic:
+// local state updates immediately and reverts if a save fails.
 // ============================================================================
 "use client";
 
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, ListTodo, Circle } from "lucide-react";
+import { ChevronLeft, ChevronRight, ListTodo } from "lucide-react";
+import { addDays, isSameDay } from "@/lib/calendar";
+import type { AssignmentItem } from "@/lib/types";
+import type { TodoItemRow } from "@/lib/todo";
+import {
+  addTodoItemAction,
+  removeTodoItemAction,
+  setTodoItemDoneAction,
+  setAssignmentDoneAction,
+} from "@/app/todo/actions";
+import { cn } from "@/lib/utils";
 
-// Hard-coded sample rows so the panel looks real while we design the layout.
-const SAMPLE_TODOS = [
-  { id: "s1", text: "Finish lab report draft", meta: "Today" },
-  { id: "s2", text: "Read Chapter 5", meta: "Tomorrow" },
-  { id: "s3", text: "Email professor about extension", meta: "This week" },
-  { id: "s4", text: "Start problem set 3", meta: "Fri" },
-];
+// Local YYYY-MM-DD for a Date (matches how the migration stores todo_items.day).
+function ymd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
-export function TodoPanel() {
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function tempId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `tmp-${crypto.randomUUID()}`;
+  }
+  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function TodoPanel({
+  assignments,
+  todoItems,
+  doneAssignmentIds,
+}: {
+  assignments: AssignmentItem[];
+  todoItems: TodoItemRow[];
+  doneAssignmentIds: number[];
+}) {
   // Start collapsed so the calendar has the full width by default.
   const [collapsed, setCollapsed] = useState(true);
+  const [day, setDay] = useState<Date>(() => new Date());
+
+  // Optimistic local state, seeded ONCE from the server props.
+  const [items, setItems] = useState<TodoItemRow[]>(() => todoItems);
+  const [doneIds, setDoneIds] = useState<Set<number>>(
+    () => new Set(doneAssignmentIds)
+  );
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const today = new Date();
+  const dayKey = ymd(day);
+
+  // The selected day's assignments (filtered by local day) + manual items.
+  const dayAssignments = assignments
+    .filter((a) => a.due_at && isSameDay(new Date(a.due_at), day))
+    .sort(
+      (a, b) => new Date(a.due_at!).getTime() - new Date(b.due_at!).getTime()
+    );
+  const dayItems = items.filter((i) => i.day === dayKey);
+
+  // --- mutations (optimistic + revert on failure) ----------------------------
+
+  async function toggleAssignment(canvasId: number, nextDone: boolean) {
+    const prev = doneIds;
+    setDoneIds((s) => {
+      const n = new Set(s);
+      if (nextDone) n.add(canvasId);
+      else n.delete(canvasId);
+      return n;
+    });
+    const res = await setAssignmentDoneAction(canvasId, nextDone);
+    if (!res.ok) {
+      setDoneIds(prev);
+      setError("Couldn’t save that — it’s been put back.");
+    }
+  }
+
+  async function toggleItem(id: string, nextDone: boolean) {
+    const prev = items;
+    setItems((list) =>
+      list.map((i) => (i.id === id ? { ...i, done: nextDone } : i))
+    );
+    const res = await setTodoItemDoneAction(id, nextDone);
+    if (!res.ok) {
+      setItems(prev);
+      setError("Couldn’t save that — it’s been put back.");
+    }
+  }
+
+  async function removeItem(id: string) {
+    const prev = items;
+    setItems((list) => list.filter((i) => i.id !== id));
+    const res = await removeTodoItemAction(id);
+    if (!res.ok) {
+      setItems(prev);
+      setError("Couldn’t remove that — it’s been restored.");
+    }
+  }
+
+  async function addItem(e: React.FormEvent) {
+    e.preventDefault();
+    const text = draft.trim();
+    if (!text) return;
+    setDraft("");
+    const id = tempId();
+    setItems((list) => [...list, { id, day: dayKey, text, done: false }]);
+
+    const res = await addTodoItemAction(dayKey, text);
+    if (!res.ok) {
+      setItems((list) => list.filter((i) => i.id !== id));
+      setError("Couldn’t add that item — nothing was saved.");
+      return;
+    }
+    if (res.id) {
+      const realId = res.id;
+      setItems((list) =>
+        list.map((i) => (i.id === id ? { ...i, id: realId } : i))
+      );
+    }
+  }
+
+  // --- collapsed rail --------------------------------------------------------
 
   if (collapsed) {
     return (
@@ -48,15 +170,21 @@ export function TodoPanel() {
     );
   }
 
+  // --- expanded panel --------------------------------------------------------
+
+  const isTodaySelected = isSameDay(day, today);
+  const isTomorrow = isSameDay(day, addDays(today, 1));
+  const relLabel = isTodaySelected
+    ? "Today"
+    : isTomorrow
+      ? "Tomorrow"
+      : day.toLocaleDateString(undefined, { weekday: "long" });
+
   return (
     <div className="flex h-full w-full flex-col rounded-xl border bg-card xl:w-80">
+      {/* Header + collapse */}
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold tracking-tight">To-Do List</h2>
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-            Preview
-          </span>
-        </div>
+        <h2 className="text-sm font-semibold tracking-tight">To-Do</h2>
         <button
           type="button"
           onClick={() => setCollapsed(true)}
@@ -67,29 +195,176 @@ export function TodoPanel() {
         </button>
       </div>
 
-      <ul className="flex flex-col gap-1 p-2">
-        {SAMPLE_TODOS.map((todo) => (
-          <li
-            key={todo.id}
-            className="flex items-start gap-2.5 rounded-lg px-2 py-2 hover:bg-accent/50"
-          >
-            {/* Non-interactive: purely a visual checkbox for now. */}
-            <Circle
-              className="mt-0.5 size-4 shrink-0 text-muted-foreground/60"
-              aria-hidden
-            />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm">{todo.text}</p>
-              <p className="text-xs text-muted-foreground">{todo.meta}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
+      {/* Day navigation */}
+      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setDay((d) => addDays(d, -1))}
+          aria-label="Previous day"
+          className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
+        >
+          <ChevronLeft className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setDay(new Date())}
+          className="min-w-0 flex-1 text-center"
+          title="Jump to today"
+        >
+          <div className="text-sm font-medium leading-tight">{relLabel}</div>
+          <div className="truncate text-xs text-muted-foreground">
+            {day.toLocaleDateString(undefined, {
+              month: "short",
+              day: "numeric",
+            })}
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setDay((d) => addDays(d, 1))}
+          aria-label="Next day"
+          className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
+        >
+          <ChevronRight className="size-4" />
+        </button>
+      </div>
 
-      <p className="mt-auto border-t px-4 py-3 text-xs text-muted-foreground">
-        Task tracking is coming soon — this is a preview of where your to-dos
-        will live.
-      </p>
+      {/* Lists */}
+      <div className="min-h-0 flex-1 overflow-auto p-2">
+        {dayAssignments.length === 0 && dayItems.length === 0 ? (
+          <p className="px-2 py-6 text-center text-sm text-muted-foreground">
+            Nothing for this day.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {/* Canvas assignments (checkable, not removable) */}
+            {dayAssignments.map((a) => {
+              const done = doneIds.has(a.canvas_assignment_id);
+              return (
+                <li
+                  key={`a-${a.id}`}
+                  className="flex items-start gap-2.5 rounded-lg px-2 py-2 hover:bg-accent/50"
+                >
+                  <Checkbox
+                    checked={done}
+                    onChange={() =>
+                      toggleAssignment(a.canvas_assignment_id, !done)
+                    }
+                    label={a.title}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className={cn(
+                        "truncate text-sm",
+                        done && "text-muted-foreground line-through"
+                      )}
+                    >
+                      {a.html_url ? (
+                        <a
+                          href={a.html_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:underline"
+                        >
+                          {a.title}
+                        </a>
+                      ) : (
+                        a.title
+                      )}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {a.due_at ? `Due ${formatTime(a.due_at)}` : "Assignment"}
+                      {a.course_name ? ` · ${a.course_name}` : ""}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+
+            {/* Manual items (checkable + removable) */}
+            {dayItems.map((i) => (
+              <li
+                key={`t-${i.id}`}
+                className="group flex items-start gap-2.5 rounded-lg px-2 py-2 hover:bg-accent/50"
+              >
+                <Checkbox
+                  checked={i.done}
+                  onChange={() => toggleItem(i.id, !i.done)}
+                  label={i.text}
+                />
+                <p
+                  className={cn(
+                    "min-w-0 flex-1 break-words text-sm",
+                    i.done && "text-muted-foreground line-through"
+                  )}
+                >
+                  {i.text}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => removeItem(i.id)}
+                  aria-label="Remove item"
+                  className="shrink-0 rounded px-1 text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Add a manual item to the selected day */}
+      <form onSubmit={addItem} className="flex gap-2 border-t p-2">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Add a to-do…"
+          className="min-w-0 flex-1 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        />
+        <button
+          type="submit"
+          disabled={!draft.trim()}
+          className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+        >
+          Add
+        </button>
+      </form>
+
+      {error && (
+        <p className="px-3 pb-2 text-xs text-destructive" role="status">
+          {error}
+        </p>
+      )}
     </div>
+  );
+}
+
+// A small square checkbox button (theme-token styled).
+function Checkbox({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={`${checked ? "Uncheck" : "Check"} ${label}`}
+      onClick={onChange}
+      className={cn(
+        "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border text-[10px] leading-none",
+        checked
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-input text-transparent hover:border-ring"
+      )}
+    >
+      ✓
+    </button>
   );
 }

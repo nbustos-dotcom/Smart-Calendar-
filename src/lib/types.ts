@@ -7,6 +7,7 @@
 
 export type AssignmentItem = {
   id: string;
+  canvas_assignment_id: number;
   title: string;
   due_at: string | null;
   points_possible: number | null;

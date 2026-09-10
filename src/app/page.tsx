@@ -11,7 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getConnectionStatus } from "@/lib/canvas-connection";
 import { CalendarView } from "@/components/calendar-view";
 import { TodoPanel } from "@/components/todo-panel";
-import { DueTodayBubble } from "@/components/due-today-bubble";
+import { listTodoItems, listDoneAssignmentIds } from "@/lib/todo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { AssignmentItem, ClassEventItem } from "@/lib/types";
@@ -21,6 +21,7 @@ import type { UserEventRow, OverrideRow } from "@/lib/recurrence";
 // normalize below.
 type AssignmentRow = {
   id: string;
+  canvas_assignment_id: number;
   title: string;
   due_at: string | null;
   points_possible: number | null;
@@ -46,7 +47,7 @@ export default async function HomePage() {
   const { data: assignmentRows } = await supabase
     .from("assignments")
     .select(
-      "id, title, due_at, points_possible, submission_types, html_url, courses(name)"
+      "id, canvas_assignment_id, title, due_at, points_possible, submission_types, html_url, courses(name)"
     )
     .order("due_at", { ascending: true, nullsFirst: false });
 
@@ -69,10 +70,15 @@ export default async function HomePage() {
       "id, event_id, occurrence_date, status, starts_at, ends_at, title, color"
     );
 
+  // To-do panel data: the user's manual items + which assignments are ticked off.
+  const todoItems = await listTodoItems();
+  const doneAssignmentIds = await listDoneAssignmentIds();
+
   const assignments: AssignmentItem[] = (
     (assignmentRows ?? []) as unknown as AssignmentRow[]
   ).map((r) => ({
     id: r.id,
+    canvas_assignment_id: Number(r.canvas_assignment_id),
     title: r.title,
     due_at: r.due_at,
     points_possible: r.points_possible,
@@ -163,15 +169,15 @@ export default async function HomePage() {
             {/* Width is controlled by TodoPanel itself (collapsed rail vs full
                 panel); the calendar (flex-1) reclaims the space when collapsed. */}
             <aside className="min-h-0 w-full shrink-0 xl:w-auto">
-              <TodoPanel />
+              <TodoPanel
+                assignments={assignments}
+                todoItems={todoItems}
+                doneAssignmentIds={doneAssignmentIds}
+              />
             </aside>
           </div>
         </div>
       )}
-
-      {/* Always-visible floating "due today" indicator (reads existing
-          assignment data only). Fixed to the viewport's bottom-right. */}
-      <DueTodayBubble assignments={assignments} />
     </main>
   );
 }
