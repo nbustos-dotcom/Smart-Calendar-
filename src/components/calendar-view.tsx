@@ -44,6 +44,7 @@ import {
   setSingleEventTimeAction,
   updateSeriesAction,
 } from "@/app/events/actions";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -377,19 +378,31 @@ export function CalendarView({
       {/* Toolbar */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => move(-1)}>
-            ← Prev
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
+          {/* Bare, icon-only nav controls (no borders/backgrounds). Behaviour
+              is unchanged; only the visual treatment differs. */}
+          <button
+            type="button"
+            onClick={() => move(-1)}
+            aria-label="Previous"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ChevronLeft className="size-5" />
+          </button>
+          <button
+            type="button"
             onClick={() => setAnchor(new Date())}
+            className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             Today
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => move(1)}>
-            Next →
-          </Button>
+          </button>
+          <button
+            type="button"
+            onClick={() => move(1)}
+            aria-label="Next"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ChevronRight className="size-5" />
+          </button>
           <span className="ml-1 text-sm font-medium">
             {anchor.toLocaleDateString(undefined, {
               month: "long",
