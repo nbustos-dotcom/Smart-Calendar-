@@ -109,14 +109,16 @@ export async function getCourses(
   return getAllPages<unknown>(creds, url);
 }
 
-// Assignments for one course.
+// Assignments for one course. `include[]=submission` asks Canvas to embed the
+// CURRENT USER's submission object in each assignment, so we learn submitted /
+// graded state in the SAME request — no per-assignment calls.
 export async function getAssignmentsForCourse(
   creds: CanvasCredentials,
   canvasCourseId: number
 ): Promise<unknown[]> {
   const url =
     `${apiBase(creds)}/courses/${canvasCourseId}/assignments` +
-    `?per_page=100&order_by=due_at`;
+    `?per_page=100&order_by=due_at&include[]=submission`;
   return getAllPages<unknown>(creds, url);
 }
 

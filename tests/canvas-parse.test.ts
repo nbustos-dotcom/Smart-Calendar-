@@ -67,7 +67,44 @@ describe("mapAssignment", () => {
       submission_types: ["online_upload"],
       assignment_group_id: 9,
       html_url: "https://mtu.instructure.com/courses/101/assignments/5",
+      submitted: false,
+      graded: false,
     });
+  });
+
+  it("reads submitted / graded from the embedded submission", () => {
+    const base = { id: 5, course_id: 101, name: "HW" };
+
+    // No submission object → both false.
+    expect(mapAssignment(base)).toMatchObject({
+      submitted: false,
+      graded: false,
+    });
+
+    // Submitted but not graded.
+    expect(
+      mapAssignment({
+        ...base,
+        submission: { workflow_state: "submitted", submitted_at: "2026-09-10T10:00:00Z" },
+      })
+    ).toMatchObject({ submitted: true, graded: false });
+
+    // Graded implies submitted-visual (workflow_state "graded").
+    expect(
+      mapAssignment({
+        ...base,
+        submission: {
+          workflow_state: "graded",
+          submitted_at: "2026-09-10T10:00:00Z",
+          graded_at: "2026-09-11T09:00:00Z",
+        },
+      })
+    ).toMatchObject({ submitted: true, graded: true });
+
+    // Unsubmitted → both false.
+    expect(
+      mapAssignment({ ...base, submission: { workflow_state: "unsubmitted" } })
+    ).toMatchObject({ submitted: false, graded: false });
   });
 
   it("keeps a missing due date as null — never guesses one", () => {

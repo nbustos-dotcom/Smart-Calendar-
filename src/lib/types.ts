@@ -14,6 +14,8 @@ export type AssignmentItem = {
   submission_types: string[];
   html_url: string | null;
   course_name: string | null;
+  submitted: boolean; // Canvas: the user has submitted this assignment
+  graded: boolean; // Canvas: this assignment has been graded (score not shown)
 };
 
 export type ClassEventItem = {

@@ -27,6 +27,8 @@ type AssignmentRow = {
   points_possible: number | null;
   submission_types: string[] | null;
   html_url: string | null;
+  submitted: boolean | null;
+  graded: boolean | null;
   courses: { name: string } | null;
 };
 
@@ -47,7 +49,7 @@ export default async function HomePage() {
   const { data: assignmentRows } = await supabase
     .from("assignments")
     .select(
-      "id, canvas_assignment_id, title, due_at, points_possible, submission_types, html_url, courses(name)"
+      "id, canvas_assignment_id, title, due_at, points_possible, submission_types, html_url, submitted, graded, courses(name)"
     )
     .order("due_at", { ascending: true, nullsFirst: false });
 
@@ -85,6 +87,8 @@ export default async function HomePage() {
     submission_types: r.submission_types ?? [],
     html_url: r.html_url,
     course_name: r.courses?.name ?? null,
+    submitted: r.submitted ?? false,
+    graded: r.graded ?? false,
   }));
 
   const events: ClassEventItem[] = (

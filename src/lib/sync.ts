@@ -98,6 +98,8 @@ export async function syncCanvas(): Promise<SyncResult> {
           submission_types: a.submission_types,
           assignment_group_id: a.assignment_group_id,
           html_url: a.html_url,
+          submitted: a.submitted,
+          graded: a.graded,
           updated_at: new Date().toISOString(),
         }));
 

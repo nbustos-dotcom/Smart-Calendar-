@@ -66,6 +66,8 @@ export type AssignmentRow = {
   submission_types: string[];
   assignment_group_id: number | null;
   html_url: string | null;
+  submitted: boolean; // the user has submitted it (from include[]=submission)
+  graded: boolean; // it has been graded (we never read the score itself)
 };
 
 export function mapAssignment(raw: unknown): AssignmentRow | null {
@@ -73,6 +75,8 @@ export function mapAssignment(raw: unknown): AssignmentRow | null {
   const id = raw.id;
   const courseId = raw.course_id;
   if (typeof id !== "number" || typeof courseId !== "number") return null;
+
+  const { submitted, graded } = readSubmissionState(raw.submission);
 
   return {
     canvas_assignment_id: id,
@@ -91,7 +95,33 @@ export function mapAssignment(raw: unknown): AssignmentRow | null {
         ? raw.assignment_group_id
         : null,
     html_url: typeof raw.html_url === "string" ? raw.html_url : null,
+    submitted,
+    graded,
   };
+}
+
+// Derive submitted / graded from the embedded submission object (from
+// include[]=submission). Deterministic:
+//  * submitted — the user has turned something in: a submitted_at timestamp, or
+//    a workflow_state that implies a submission exists.
+//  * graded — a grade has been posted: a graded_at timestamp, or
+//    workflow_state "graded". We deliberately never read the score itself.
+function readSubmissionState(submission: unknown): {
+  submitted: boolean;
+  graded: boolean;
+} {
+  if (!isObject(submission)) return { submitted: false, graded: false };
+  const state =
+    typeof submission.workflow_state === "string"
+      ? submission.workflow_state
+      : "";
+  const submitted =
+    submission.submitted_at != null ||
+    state === "submitted" ||
+    state === "pending_review" ||
+    state === "graded";
+  const graded = submission.graded_at != null || state === "graded";
+  return { submitted, graded };
 }
 
 export type ClassEventRow = {

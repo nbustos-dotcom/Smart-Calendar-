@@ -260,6 +260,9 @@ export function TodoPanel({
             {/* Canvas assignments (checkable, not removable) */}
             {dayAssignments.map((a) => {
               const done = doneIds.has(a.canvas_assignment_id);
+              // Submitted (or graded) on Canvas strikes it through even if the
+              // user never manually checked it — same look as manual check-off.
+              const struck = done || a.submitted || a.graded;
               return (
                 <li
                   key={`a-${a.id}`}
@@ -276,7 +279,7 @@ export function TodoPanel({
                     <p
                       className={cn(
                         "truncate text-sm",
-                        done && "text-muted-foreground line-through"
+                        struck && "text-muted-foreground line-through"
                       )}
                     >
                       {a.html_url ? (
@@ -295,6 +298,11 @@ export function TodoPanel({
                     <p className="text-xs text-muted-foreground">
                       {a.due_at ? `Due ${formatTime(a.due_at)}` : "Assignment"}
                       {a.course_name ? ` · ${a.course_name}` : ""}
+                      {a.graded && (
+                        <span className="ml-1.5 font-medium text-green-600 dark:text-green-400 hyper-focus:text-green-400">
+                          graded
+                        </span>
+                      )}
                     </p>
                   </div>
                 </li>

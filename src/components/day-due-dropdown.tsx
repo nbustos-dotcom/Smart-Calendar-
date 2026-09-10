@@ -21,6 +21,8 @@ export type DayDueItem = {
   title: string;
   href: string | null;
   at: string; // ISO due timestamp
+  submitted: boolean; // Canvas: submitted → shown struck through
+  graded: boolean; // Canvas: graded → shown with a green "graded" note
 };
 
 function formatTime(iso: string): string {
@@ -86,27 +88,41 @@ export function DayDueDropdown({
           )}
         >
           <ul className="max-h-56 overflow-auto p-1">
-            {items.map((it) => (
-              <li key={it.id} className="rounded px-1.5 py-1 hover:bg-muted">
-                <div className="text-[11px] font-medium leading-tight">
-                  {it.href ? (
-                    <a
-                      href={it.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                    >
-                      {it.title}
-                    </a>
-                  ) : (
-                    it.title
-                  )}
-                </div>
-                <div className="text-[10px] text-muted-foreground">
-                  Due {formatTime(it.at)}
-                </div>
-              </li>
-            ))}
+            {items.map((it) => {
+              const struck = it.submitted || it.graded;
+              return (
+                <li key={it.id} className="rounded px-1.5 py-1 hover:bg-muted">
+                  <div
+                    className={cn(
+                      "text-[11px] font-medium leading-tight",
+                      // Same strikethrough style the to-do list uses for done.
+                      struck && "text-muted-foreground line-through"
+                    )}
+                  >
+                    {it.href ? (
+                      <a
+                        href={it.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:underline"
+                      >
+                        {it.title}
+                      </a>
+                    ) : (
+                      it.title
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <span>Due {formatTime(it.at)}</span>
+                    {it.graded && (
+                      <span className="font-medium text-green-600 dark:text-green-400 hyper-focus:text-green-400">
+                        graded
+                      </span>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

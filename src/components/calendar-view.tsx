@@ -847,6 +847,8 @@ function WeekView({
                   title: a.title,
                   href: a.html_url,
                   at: a.due_at!,
+                  submitted: a.submitted,
+                  graded: a.graded,
                 }));
               return (
                 <div
