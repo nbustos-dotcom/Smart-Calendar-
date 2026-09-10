@@ -20,6 +20,12 @@ import { Label } from "@/components/ui/label";
 import { EVENT_COLORS, colorStyle, type EventColor } from "@/lib/event-colors";
 import { cn } from "@/lib/utils";
 
+// Styling for the native date/time picker indicator so it's a clear, clickable
+// target and stays visible in every theme: the browser's default glyph is dark,
+// which vanishes on the dark / hyper-focus backgrounds, so we invert it there.
+const PICKER_ICON =
+  "[&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 dark:[&::-webkit-calendar-picker-indicator]:invert hyper-focus:[&::-webkit-calendar-picker-indicator]:invert";
+
 // Monday-first weekday chips, but we store/emit 0=Sun..6=Sat.
 const WEEKDAY_CHIPS: { value: number; label: string }[] = [
   { value: 1, label: "Mon" },
@@ -149,41 +155,48 @@ export function EventDialog({
             />
           </div>
 
-          {/* Date + times */}
-          <div className="grid grid-cols-3 gap-2">
+          {/* Date + times. Date gets its own full-width row so the value and
+              the calendar icon are never clipped; the two times sit side by
+              side with comfortable width. */}
+          <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="event-date">Date</Label>
               <Input
                 id="event-date"
                 type="date"
+                className={PICKER_ICON}
                 value={values.date}
                 onChange={(e) => set("date", e.target.value)}
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="event-start">Start</Label>
-              <Input
-                id="event-start"
-                type="time"
-                value={values.startTime}
-                onChange={(e) => set("startTime", e.target.value)}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="event-start">Start</Label>
+                <Input
+                  id="event-start"
+                  type="time"
+                  className={PICKER_ICON}
+                  value={values.startTime}
+                  onChange={(e) => set("startTime", e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="event-end">End</Label>
+                <Input
+                  id="event-end"
+                  type="time"
+                  className={PICKER_ICON}
+                  value={values.endTime}
+                  onChange={(e) => set("endTime", e.target.value)}
+                />
+              </div>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="event-end">End</Label>
-              <Input
-                id="event-end"
-                type="time"
-                value={values.endTime}
-                onChange={(e) => set("endTime", e.target.value)}
-              />
-            </div>
+            {values.endTime <= values.startTime && (
+              <p className="text-xs text-destructive">
+                End time must be after the start time.
+              </p>
+            )}
           </div>
-          {values.endTime <= values.startTime && (
-            <p className="-mt-2 text-xs text-destructive">
-              End time must be after the start time.
-            </p>
-          )}
 
           {/* Colour */}
           <div className="flex flex-col gap-1.5">

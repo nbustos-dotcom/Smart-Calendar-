@@ -27,6 +27,12 @@ import {
 } from "@/app/todo/actions";
 import { cn } from "@/lib/utils";
 
+// Native time-picker indicator: clear, clickable, and visible in every theme
+// (the browser's default glyph is dark and vanishes on dark / hyper-focus, so
+// we invert it there).
+const PICKER_ICON =
+  "[&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 dark:[&::-webkit-calendar-picker-indicator]:invert hyper-focus:[&::-webkit-calendar-picker-indicator]:invert";
+
 // Local YYYY-MM-DD for a Date (matches how the migration stores todo_items.day).
 function ymd(d: Date): string {
   const y = d.getFullYear();
@@ -363,7 +369,10 @@ export function TodoPanel({
           onChange={(e) => setDraftTime(e.target.value)}
           aria-label="Optional time"
           title="Optional time"
-          className="w-[104px] shrink-0 rounded-md border border-input bg-transparent px-2 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className={cn(
+            "w-[132px] shrink-0 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+            PICKER_ICON
+          )}
         />
         <button
           type="submit"
