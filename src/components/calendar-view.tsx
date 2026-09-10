@@ -1094,9 +1094,24 @@ function WeekView({
   );
 }
 
-// A thin red line marking the current time on today's column.
+// A thin red line marking the current time on today's column. The current time
+// is read on the CLIENT after mount (not during server render, which would
+// mismatch and warn on hydration) and ticks on a timer so the line advances on
+// its own without a page reload.
 function NowLine({ minHour, maxHour }: { minHour: number; maxHour: number }) {
-  const nowMin = minutesOfDay(new Date());
+  // null until mounted → nothing renders on the server / first paint, so the
+  // server and client trees match.
+  const [nowMin, setNowMin] = useState<number | null>(null);
+
+  useEffect(() => {
+    const tick = () => setNowMin(minutesOfDay(new Date()));
+    tick(); // set immediately on mount
+    // Update every 30s so the line keeps up as minutes pass, then clean up.
+    const id = setInterval(tick, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (nowMin === null) return null;
   if (nowMin < minHour * 60 || nowMin > maxHour * 60) return null;
   const top = ((nowMin - minHour * 60) / 60) * HOUR_PX;
   return (
