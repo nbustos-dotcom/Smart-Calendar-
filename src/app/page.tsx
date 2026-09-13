@@ -44,37 +44,49 @@ type ClassEventRow = {
 
 export default async function HomePage() {
   const supabase = await createClient();
-  const status = await getConnectionStatus();
 
-  const { data: assignmentRows } = await supabase
-    .from("assignments")
-    .select(
-      "id, canvas_assignment_id, title, due_at, points_possible, submission_types, html_url, submitted, graded, courses(name)"
-    )
-    .order("due_at", { ascending: true, nullsFirst: false });
-
-  const { data: eventRows } = await supabase
-    .from("class_events")
-    .select(
-      "id, title, start_at, end_at, location_name, html_url, courses(name)"
-    )
-    .order("start_at", { ascending: true, nullsFirst: false });
-
-  // The user's own editable events (Phase 2) + per-occurrence overrides.
-  const { data: userEventRows } = await supabase
-    .from("user_events")
-    .select(
-      "id, title, color, is_recurring, starts_at, ends_at, weekdays, start_minute, end_minute, series_start_date"
-    );
-  const { data: overrideRows } = await supabase
-    .from("user_event_overrides")
-    .select(
-      "id, event_id, occurrence_date, status, starts_at, ends_at, title, color"
-    );
-
-  // To-do panel data: the user's manual items + which assignments are ticked off.
-  const todoItems = await listTodoItems();
-  const doneAssignmentIds = await listDoneAssignmentIds();
+  // These reads are all independent, so fire them concurrently instead of
+  // awaiting one after another. That turns what was a 7-round-trip waterfall on
+  // every dashboard load (e.g. each time you come back from Settings) into a
+  // single concurrent batch, which is the main thing that made navigation feel
+  // slow. Same queries as before — just not serialized.
+  const [
+    status,
+    { data: assignmentRows },
+    { data: eventRows },
+    { data: userEventRows },
+    { data: overrideRows },
+    todoItems,
+    doneAssignmentIds,
+  ] = await Promise.all([
+    getConnectionStatus(),
+    supabase
+      .from("assignments")
+      .select(
+        "id, canvas_assignment_id, title, due_at, points_possible, submission_types, html_url, submitted, graded, courses(name)"
+      )
+      .order("due_at", { ascending: true, nullsFirst: false }),
+    supabase
+      .from("class_events")
+      .select(
+        "id, title, start_at, end_at, location_name, html_url, courses(name)"
+      )
+      .order("start_at", { ascending: true, nullsFirst: false }),
+    // The user's own editable events (Phase 2) + per-occurrence overrides.
+    supabase
+      .from("user_events")
+      .select(
+        "id, title, color, is_recurring, starts_at, ends_at, weekdays, start_minute, end_minute, series_start_date"
+      ),
+    supabase
+      .from("user_event_overrides")
+      .select(
+        "id, event_id, occurrence_date, status, starts_at, ends_at, title, color"
+      ),
+    // To-do panel data: the user's manual items + which assignments are ticked off.
+    listTodoItems(),
+    listDoneAssignmentIds(),
+  ]);
 
   const assignments: AssignmentItem[] = (
     (assignmentRows ?? []) as unknown as AssignmentRow[]
