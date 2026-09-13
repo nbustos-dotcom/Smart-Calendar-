@@ -33,15 +33,16 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-// Monday-first weekday chips, but we store/emit 0=Sun..6=Sat.
+// Sunday-first weekday chips (matching the Sunday-first calendar week). The
+// value stored/emitted is still 0=Sun..6=Sat; only the display order changed.
 const WEEKDAY_CHIPS: { value: number; label: string }[] = [
+  { value: 0, label: "Sun" },
   { value: 1, label: "Mon" },
   { value: 2, label: "Tue" },
   { value: 3, label: "Wed" },
   { value: 4, label: "Thu" },
   { value: 5, label: "Fri" },
   { value: 6, label: "Sat" },
-  { value: 0, label: "Sun" },
 ];
 
 // The editable fields the form collects.

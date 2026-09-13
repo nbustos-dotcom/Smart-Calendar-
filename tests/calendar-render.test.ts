@@ -15,6 +15,7 @@ vi.mock("@/app/events/actions", () => ({
 }));
 
 import { CalendarView } from "@/components/calendar-view";
+import { startOfWeek } from "@/lib/calendar";
 
 // Regression: a user event whose day falls in the currently-shown week must
 // actually render on the grid. This once broke because the Monday-first week
@@ -53,6 +54,36 @@ describe("calendar renders the user's own events", () => {
       },
     ]);
     expect(html).toContain("Study group");
+  });
+
+  it("shows an event that lands on the week's Sunday (the first column)", () => {
+    // Sunday is now the first (leftmost) column and the start of the week's
+    // date range. An event on that Sunday must fall inside the range and render
+    // — this is the boundary day the old Monday-first range math dropped.
+    const sunday = startOfWeek(new Date());
+    const iso = (h: number) =>
+      new Date(
+        sunday.getFullYear(),
+        sunday.getMonth(),
+        sunday.getDate(),
+        h,
+        0
+      ).toISOString();
+    const html = render([
+      {
+        id: "u3",
+        title: "Sunday brunch",
+        color: "orange",
+        is_recurring: false,
+        starts_at: iso(11),
+        ends_at: iso(12),
+        weekdays: [],
+        start_minute: null,
+        end_minute: null,
+        series_start_date: null,
+      },
+    ]);
+    expect(html).toContain("Sunday brunch");
   });
 
   it("shows a weekly-recurring event (it repeats through the current week)", () => {
