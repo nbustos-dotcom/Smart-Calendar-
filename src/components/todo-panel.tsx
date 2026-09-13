@@ -14,8 +14,8 @@
 // ============================================================================
 "use client";
 
-import { useState } from "react";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight, PanelRightClose, Plus } from "lucide-react";
 import { addDays, isSameDay } from "@/lib/calendar";
 import type { AssignmentItem } from "@/lib/types";
 import type { TodoItemRow } from "@/lib/todo";
@@ -170,6 +170,20 @@ export function TodoPanel({
     }
   }
 
+  // Esc collapses the panel when it's open — but not while a modal dialog is
+  // up (the event dialog owns Escape then), so we don't collapse out from
+  // under it.
+  useEffect(() => {
+    if (collapsed) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (document.querySelector('[role="dialog"]')) return;
+      setCollapsed(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [collapsed]);
+
   // --- one panel that morphs between a slim rail and the full list -----------
   // Deliberately NOT an early return: the same container stays mounted in both
   // states so collapsing/expanding can animate. Only cheap properties animate —
@@ -207,31 +221,46 @@ export function TodoPanel({
       {...barProps}
       className={cn(
         "group relative flex h-full w-full flex-col overflow-hidden rounded-xl border bg-card outline-none",
-        // The one layout property we animate (the panel "widening"); the calendar
-        // beside it reclaims the freed space. Body content is pinned to the
-        // expanded width below so it is revealed, not re-laid-out, each frame.
-        "transition-[width] duration-300 ease-out motion-reduce:transition-none",
+        // Width is the one layout property we animate (the panel "widening");
+        // box-shadow/border animate for the collapsed hover glow. Body content
+        // is pinned to the expanded width below so it is revealed, not
+        // re-laid-out, each frame.
+        "transition-[width,box-shadow,border-color] duration-300 ease-out motion-reduce:transition-none",
         collapsed
-          ? "cursor-pointer focus-visible:ring-2 focus-visible:ring-ring xl:w-12"
+          ? // Collapsed: a clickable tab with a soft, theme-appropriate border
+            // glow on hover (the --ring token is blue in hyper-focus, neutral in
+            // light/dark). Keyboard focus gets a crisp ring.
+            "cursor-pointer hover:border-ring hover:shadow-[0_0_16px_-3px_var(--color-ring)] focus-visible:ring-2 focus-visible:ring-ring xl:w-12"
           : "xl:w-80"
       )}
     >
-      {/* HEADER — one row: the rotating "To-Do" title on the left, day nav on
-          the right (req 1). The title lives in a fixed 48px box that never
-          moves, so expand/collapse only rotates it (vertical ⇄ horizontal). */}
+      {/* The "To-Do" title. It's absolutely positioned so it can travel AND
+          rotate in one coordinated transition: centered + vertical on the
+          collapsed rail (req 1 — balanced, not cramped at the top), flying up to
+          the header and rotating flat as the panel opens (req 3). All transform
+          + `top`, no reflow. It sits in the left 48px column, matching the
+          header spacer below, so expanded it reads as the header title. */}
+      <h2
+        aria-hidden={collapsed}
+        className={cn(
+          "pointer-events-none absolute left-0 z-10 w-12 origin-center text-center text-sm font-semibold tracking-tight transition-all duration-300 ease-out motion-reduce:transition-none",
+          collapsed
+            ? // Vertically centered in the bar; rotated to vertical only on the
+              // xl rail (on a narrow screen the collapsed bar is a short
+              // horizontal strip, so the label stays horizontal there).
+              "top-1/2 -translate-y-1/2 text-muted-foreground group-hover:text-foreground xl:rotate-90"
+            : "top-4 translate-y-0 rotate-0 text-foreground"
+        )}
+      >
+        To-Do
+      </h2>
+
+      {/* HEADER — one row (req 1): the title (above, in the 48px spacer column)
+          on the left, day nav + collapse on the right. */}
       <div className={cn("flex shrink-0 items-center", !collapsed && "border-b")}>
-        <div className="flex size-12 shrink-0 items-center justify-center">
-          <h2
-            className={cn(
-              "origin-center whitespace-nowrap text-sm font-semibold tracking-tight transition-transform duration-300 ease-out motion-reduce:transition-none",
-              collapsed
-                ? "text-muted-foreground group-hover:text-foreground xl:rotate-90"
-                : "rotate-0 text-foreground"
-            )}
-          >
-            To-Do
-          </h2>
-        </div>
+        {/* Reserves the title's 48px column; the real title is the absolute
+            element above so it can animate independently of this row. */}
+        <div className="size-12 shrink-0" aria-hidden />
 
         {/* Day navigation + collapse. Faded and inert while collapsed so it is
             neither visible nor tab-reachable behind the slim bar. */}
@@ -274,13 +303,15 @@ export function TodoPanel({
           >
             <ChevronRight className="size-4" />
           </button>
+          {/* Collapse: a deliberate "close the side panel" control, distinct
+              from the day-nav chevrons so it no longer reads as a stray arrow. */}
           <button
             type="button"
             onClick={() => setCollapsed(true)}
             aria-label="Collapse to-do list"
             className={cn(ICON_BUTTON, "ml-0.5")}
           >
-            <ChevronRight className="size-4" />
+            <PanelRightClose className="size-4" />
           </button>
         </div>
       </div>

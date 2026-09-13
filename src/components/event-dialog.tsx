@@ -13,7 +13,7 @@
 // fence. Dragging/resizing on the grid is always per-occurrence and silent.
 // ============================================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,9 +21,9 @@ import { EVENT_COLORS, colorStyle, type EventColor } from "@/lib/event-colors";
 import { PICKER_ICON } from "@/lib/input-styles";
 import { cn } from "@/lib/utils";
 
-// How long the closing (fade + scale-out) animation runs. Must match the
-// `duration-*` utility on the card below so we unmount right as it finishes.
-const CLOSE_MS = 150;
+// Fallback in case `animationend` never fires (e.g. a backgrounded tab): a bit
+// longer than the exit duration below so the animation normally wins the race.
+const CLOSE_FALLBACK_MS = 320;
 
 // Users who ask for less motion get instant open/close, no animation.
 function prefersReducedMotion(): boolean {
@@ -84,22 +84,43 @@ export function EventDialog({
   const [scope, setScope] = useState<EventScope>("occurrence");
   // While true, the dialog plays its fade/scale-out before the real close runs.
   const [closing, setClosing] = useState(false);
+  // The action to run once the exit animation finishes (unmount / submit /
+  // delete). Held in a ref so the animationend handler and the fallback timer
+  // both run it exactly once, with no open-state re-render in between.
+  const pendingClose = useRef<(() => void) | null>(null);
 
   const isEditing = target != null;
   const editingRecurringOccurrence =
     isEditing && target.isRecurring && target.occurrenceDate != null;
 
-  // Play the close animation, then run the actual close/submit/delete. Reduced
-  // motion (or a double-trigger) skips straight to the action. Keeps every exit
-  // path — backdrop, Escape, Cancel, Save, Delete — animating consistently.
+  // Run the pending close action once. The exit animation (animationend) is the
+  // normal trigger; a fallback timer covers the rare case it never fires.
+  function finishClose() {
+    const after = pendingClose.current;
+    if (!after) return;
+    pendingClose.current = null;
+    after();
+  }
+
+  // Begin closing: flip to the exit animation and remember what to do when it
+  // ends. We do NOT unmount on a timer — unmounting is driven by animationend so
+  // the element never flips back to its open state for a frame (no flash).
+  // Reduced motion (or a double-trigger) skips straight to the action.
   function requestClose(after: () => void) {
     if (closing) return;
     if (prefersReducedMotion()) {
       after();
       return;
     }
+    pendingClose.current = after;
     setClosing(true);
-    window.setTimeout(after, CLOSE_MS);
+    window.setTimeout(finishClose, CLOSE_FALLBACK_MS);
+  }
+
+  // Only the card's OWN exit animation should trigger the close (ignore any
+  // animationend bubbling up from descendants).
+  function handleCardAnimationEnd(e: React.AnimationEvent) {
+    if (closing && e.target === e.currentTarget) finishClose();
   }
 
   // Close on Escape, like a native dialog.
@@ -161,6 +182,9 @@ export function EventDialog({
           ? "motion-safe:animate-out motion-safe:fade-out-0 motion-safe:duration-150"
           : "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
       )}
+      // `forwards` holds the faded-out end state until React unmounts, so the
+      // backdrop never snaps back to full opacity for a frame.
+      style={closing ? { animationFillMode: "forwards" } : undefined}
       onClick={() => requestClose(onClose)}
     >
       <div
@@ -171,6 +195,10 @@ export function EventDialog({
             ? "motion-safe:animate-out motion-safe:fade-out-0 motion-safe:zoom-out-95 motion-safe:duration-150"
             : "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
         )}
+        // Hold the scaled/faded end state until unmount (no flash-back), and let
+        // this element's own animationend drive the actual close.
+        style={closing ? { animationFillMode: "forwards" } : undefined}
+        onAnimationEnd={handleCardAnimationEnd}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
