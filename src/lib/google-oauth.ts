@@ -54,6 +54,46 @@ export function buildGoogleAuthUrl(state: string): string {
   return `${GOOGLE_AUTH_ENDPOINT}?${params.toString()}`;
 }
 
+// Use a stored refresh token to get a fresh access token (Google does NOT
+// return a new refresh token here, so the caller keeps the existing one). This
+// is what offline access buys us: reading the calendar without re-consent.
+export async function refreshAccessToken(refreshToken: string): Promise<{
+  accessToken: string;
+  expiresInSeconds: number | null;
+  scope: string | null;
+}> {
+  const { clientId, clientSecret } = getGoogleOAuthConfig();
+  const res = await fetch(GOOGLE_TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      refresh_token: refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "refresh_token",
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Google token refresh failed (${res.status}): ${detail}`);
+  }
+
+  const data = (await res.json()) as {
+    access_token?: string;
+    expires_in?: number;
+    scope?: string;
+  };
+  if (!data.access_token) {
+    throw new Error("Google token refresh returned no access token.");
+  }
+  return {
+    accessToken: data.access_token,
+    expiresInSeconds: data.expires_in ?? null,
+    scope: data.scope ?? null,
+  };
+}
+
 // Exchange the one-time authorization `code` for access + refresh tokens.
 export async function exchangeCodeForTokens(code: string): Promise<GoogleTokens> {
   const { clientId, clientSecret, redirectUri } = getGoogleOAuthConfig();

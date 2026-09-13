@@ -12,6 +12,7 @@ import { getConnectionStatus } from "@/lib/canvas-connection";
 import { CalendarView } from "@/components/calendar-view";
 import { TodoPanel } from "@/components/todo-panel";
 import { listTodoItems, listDoneAssignmentIds } from "@/lib/todo";
+import { getGoogleCalendarEvents } from "@/lib/google-calendar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { AssignmentItem, ClassEventItem } from "@/lib/types";
@@ -58,6 +59,7 @@ export default async function HomePage() {
     { data: overrideRows },
     todoItems,
     doneAssignmentIds,
+    googleEvents,
   ] = await Promise.all([
     getConnectionStatus(),
     supabase
@@ -86,6 +88,9 @@ export default async function HomePage() {
     // To-do panel data: the user's manual items + which assignments are ticked off.
     listTodoItems(),
     listDoneAssignmentIds(),
+    // Read-only Google Calendar events (primary calendar, bounded window). Returns
+    // [] when the user hasn't connected Google, so this is safe to always call.
+    getGoogleCalendarEvents(),
   ]);
 
   const assignments: AssignmentItem[] = (
@@ -103,7 +108,7 @@ export default async function HomePage() {
     graded: r.graded ?? false,
   }));
 
-  const events: ClassEventItem[] = (
+  const canvasEvents: ClassEventItem[] = (
     (eventRows ?? []) as unknown as ClassEventRow[]
   ).map((r) => ({
     id: r.id,
@@ -113,7 +118,12 @@ export default async function HomePage() {
     location_name: r.location_name,
     html_url: r.html_url,
     course_name: r.courses?.name ?? null,
+    source: "canvas",
   }));
+
+  // Canvas class events + read-only Google Calendar events, rendered by the same
+  // read-only path (the calendar tells them apart via each event's `source`).
+  const events: ClassEventItem[] = [...canvasEvents, ...googleEvents];
 
   // Full-height app shell: header + slim strip + a two-column body that fills the
   // rest of the viewport, so the whole dashboard fits on one screen (only the

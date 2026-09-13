@@ -26,4 +26,8 @@ export type ClassEventItem = {
   location_name: string | null;
   html_url: string | null;
   course_name: string | null;
+  // Where the event came from. Canvas class events omit this (treated as
+  // "canvas"); Google Calendar events set "google" so the UI can mark them as
+  // read-only-from-Google. Both are equally non-interactive in this app.
+  source?: "canvas" | "google";
 };

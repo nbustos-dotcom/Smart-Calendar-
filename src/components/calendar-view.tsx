@@ -71,6 +71,7 @@ type GridBlock = {
   subtitle: string;
   startMin: number; // minutes from midnight
   endMin: number; // minutes from midnight
+  google?: boolean; // read-only event sourced from Google Calendar
 };
 
 // What the create/edit dialog is currently working on. `target` is null for a
@@ -601,6 +602,7 @@ function WeekView({
           .join(" · "),
         startMin,
         endMin,
+        google: e.source === "google",
       });
     }
 
@@ -910,15 +912,28 @@ function WeekView({
                   className="border-r p-1 last:border-r-0"
                 >
                   <div className="flex flex-col gap-1">
-                    {allDay.map((e) => (
-                      <div
-                        key={e.id}
-                        className="truncate rounded border-l-2 border-blue-500 bg-blue-500/10 px-1 py-0.5 text-[11px]"
-                        title={e.title}
-                      >
-                        <ItemLink href={e.html_url}>{e.title}</ItemLink>
-                      </div>
-                    ))}
+                    {allDay.map((e) => {
+                      const isGoogle = e.source === "google";
+                      return (
+                        <div
+                          key={e.id}
+                          className={cn(
+                            "flex items-center gap-0.5 truncate rounded border-l-2 px-1 py-0.5 text-[11px]",
+                            isGoogle
+                              ? "border-dashed border-muted-foreground/50 bg-muted/50 text-foreground/80"
+                              : "border-blue-500 bg-blue-500/10"
+                          )}
+                          title={
+                            isGoogle
+                              ? `${e.title} — from Google Calendar (read-only)`
+                              : e.title
+                          }
+                        >
+                          {isGoogle && <GoogleMark />}
+                          <ItemLink href={e.html_url}>{e.title}</ItemLink>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -1019,6 +1034,7 @@ function WeekView({
                     if (item.layer === "readonly") {
                       const b = item.block;
                       const isAssignment = b.kind === "assignment";
+                      const isGoogle = b.google === true;
                       return (
                         <div
                           key={item.key}
@@ -1031,10 +1047,20 @@ function WeekView({
                             "absolute overflow-hidden rounded-md px-1 py-0.5 text-[11px] leading-tight",
                             isAssignment
                               ? "border-l-4 border-amber-500 bg-amber-500/15 text-amber-950 shadow-sm dark:text-amber-100 hyper-focus:bg-amber-500/25 hyper-focus:text-amber-100"
-                              : "border-l-2 border-blue-300 bg-blue-500/5 text-blue-800/80 dark:border-blue-400/40 dark:text-blue-200/70 hyper-focus:text-blue-200/80"
+                              : isGoogle
+                                ? // Google events: understated, neutral theme-token
+                                  // styling (a dashed left edge to read "external /
+                                  // not editable here") — distinct from Canvas's
+                                  // solid blue without shouting a new colour.
+                                  "border-l-2 border-dashed border-muted-foreground/50 bg-muted/50 text-foreground/80"
+                                : "border-l-2 border-blue-300 bg-blue-500/5 text-blue-800/80 dark:border-blue-400/40 dark:text-blue-200/70 hyper-focus:text-blue-200/80"
                           )}
                           style={{ top: blockTop, height, left, width }}
-                          title={`${b.title} — ${b.subtitle}`}
+                          title={
+                            isGoogle
+                              ? `${b.title} — from Google Calendar (read-only)`
+                              : `${b.title} — ${b.subtitle}`
+                          }
                         >
                           <div
                             className={cn(
@@ -1045,6 +1071,7 @@ function WeekView({
                               isAssignment ? "font-semibold" : "font-normal"
                             )}
                           >
+                            {isGoogle && <GoogleMark />}
                             <ItemLink href={b.href}>{b.title}</ItemLink>
                           </div>
                           {height > 34 && (
@@ -1228,7 +1255,12 @@ function MonthView({
                     <MiniChip key={a.id} color="amber" label={a.title} />
                   ))}
                   {dayEvents.slice(0, 1).map((e) => (
-                    <MiniChip key={e.id} color="blue" label={e.title} />
+                    <MiniChip
+                      key={e.id}
+                      color="blue"
+                      google={e.source === "google"}
+                      label={e.title}
+                    />
                   ))}
                   {extra > 0 && (
                     <span className="text-[10px] text-muted-foreground">
@@ -1247,24 +1279,47 @@ function MonthView({
 
 // --- Small pieces ------------------------------------------------------------
 
+// A tiny, understated "G" badge marking an event as sourced from Google Calendar
+// (and therefore read-only here). Theme-token colours so it reads in light,
+// dark, and hyper-focus. Decorative — the surrounding element carries the label.
+function GoogleMark() {
+  return (
+    <span
+      aria-hidden
+      className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-[3px] border border-muted-foreground/40 align-middle text-[8px] font-bold leading-none text-muted-foreground"
+    >
+      G
+    </span>
+  );
+}
+
 function MiniChip({
   color,
   label,
+  google,
 }: {
   color: "blue" | "amber";
   label: string;
+  // Google-sourced (read-only): understated neutral styling + the G mark,
+  // instead of the loud Canvas colours.
+  google?: boolean;
 }) {
   return (
     <span
       className={cn(
-        "truncate rounded px-1 py-0.5 text-[10px] leading-tight",
-        color === "blue"
-          ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 hyper-focus:text-blue-200"
-          : "bg-amber-500/10 text-amber-700 dark:text-amber-300 hyper-focus:text-amber-200"
+        "flex items-center gap-0.5 truncate rounded px-1 py-0.5 text-[10px] leading-tight",
+        google
+          ? "bg-muted text-foreground/80"
+          : color === "blue"
+            ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 hyper-focus:text-blue-200"
+            : "bg-amber-500/10 text-amber-700 dark:text-amber-300 hyper-focus:text-amber-200"
       )}
-      title={label}
+      title={
+        google ? `${label} — from Google Calendar (read-only)` : label
+      }
     >
-      {label}
+      {google && <GoogleMark />}
+      <span className="truncate">{label}</span>
     </span>
   );
 }
