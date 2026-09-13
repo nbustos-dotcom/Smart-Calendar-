@@ -184,12 +184,12 @@ export function TodoPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [collapsed]);
 
-  // --- one panel that morphs between a slim rail and the full list -----------
+  // --- one panel that opens like a simple drawer -----------------------------
   // Deliberately NOT an early return: the same container stays mounted in both
-  // states so collapsing/expanding can animate. Only cheap properties animate —
-  // the container's width, the title's `transform: rotate()`, and the body's
-  // opacity — so the transition stays smooth. When collapsed the WHOLE bar is a
-  // single button that expands the panel (keyboard-operable too).
+  // states so open/close can animate. The expand is plain and standard — the
+  // container's width animates open while the expanded content fades in and the
+  // collapsed sideways label cross-fades out. No rotation, no moving title.
+  // When collapsed the WHOLE rail is a single button that expands it.
 
   const isTodaySelected = isSameDay(day, today);
   const isTomorrow = isSameDay(day, addDays(today, 1));
@@ -220,7 +220,9 @@ export function TodoPanel({
     <div
       {...barProps}
       className={cn(
-        "group relative flex h-full w-full flex-col overflow-hidden rounded-xl border bg-card outline-none",
+        // min-h-12 gives the collapsed mobile bar its height (its content is
+        // absolute / hidden then); on xl the rail is stretched full-height.
+        "group relative flex h-full min-h-12 w-full flex-col overflow-hidden rounded-xl border bg-card outline-none",
         // Width is the one layout property we animate (the panel "widening");
         // box-shadow/border animate for the collapsed hover glow. Body content
         // is pinned to the expanded width below so it is revealed, not
@@ -234,89 +236,23 @@ export function TodoPanel({
           : "xl:w-80"
       )}
     >
-      {/* The "To-Do" title. It's absolutely positioned so it can travel AND
-          rotate in one coordinated transition: centered + vertical on the
-          collapsed rail (req 1 — balanced, not cramped at the top), flying up to
-          the header and rotating flat as the panel opens (req 3). All transform
-          + `top`, no reflow. It sits in the left 48px column, matching the
-          header spacer below, so expanded it reads as the header title. */}
-      <h2
-        aria-hidden={collapsed}
+      {/* Collapsed rail label: static, sideways "To-Do" — no rotation, it just
+          sits there. Cross-fades with the expanded header as the panel opens.
+          On a narrow screen the collapsed bar is a short horizontal strip, so
+          the label stays horizontal there (vertical only on the xl rail). */}
+      <div
+        aria-hidden={!collapsed}
         className={cn(
-          "pointer-events-none absolute left-0 z-10 w-12 origin-center text-center text-sm font-semibold tracking-tight transition-all duration-300 ease-out motion-reduce:transition-none",
-          collapsed
-            ? // Vertically centered in the bar; rotated to vertical only on the
-              // xl rail (on a narrow screen the collapsed bar is a short
-              // horizontal strip, so the label stays horizontal there).
-              "top-1/2 -translate-y-1/2 text-muted-foreground group-hover:text-foreground xl:rotate-90"
-            : "top-4 translate-y-0 rotate-0 text-foreground"
+          "pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity duration-200 ease-out motion-reduce:transition-none",
+          collapsed ? "opacity-100" : "opacity-0"
         )}
       >
-        To-Do
-      </h2>
-
-      {/* HEADER — one row (req 1): the title (above, in the 48px spacer column)
-          on the left, day nav + collapse on the right. */}
-      <div className={cn("flex shrink-0 items-center", !collapsed && "border-b")}>
-        {/* Reserves the title's 48px column; the real title is the absolute
-            element above so it can animate independently of this row. */}
-        <div className="size-12 shrink-0" aria-hidden />
-
-        {/* Day navigation + collapse. Faded and inert while collapsed so it is
-            neither visible nor tab-reachable behind the slim bar. */}
-        <div
-          inert={collapsed ? true : undefined}
-          className={cn(
-            "flex min-w-0 flex-1 items-center gap-0.5 pr-1.5 transition-opacity duration-200 motion-reduce:transition-none",
-            collapsed ? "opacity-0" : "opacity-100"
-          )}
-        >
-          <button
-            type="button"
-            onClick={() => setDay((d) => addDays(d, -1))}
-            aria-label="Previous day"
-            className={ICON_BUTTON}
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setDay(new Date())}
-            className="min-w-0 flex-1 rounded-md px-1 py-1 text-center transition-colors hover:text-foreground"
-            title="Jump to today"
-          >
-            <span className="block truncate text-sm font-medium leading-tight">
-              {relLabel}
-            </span>
-            <span className="block truncate text-xs text-muted-foreground">
-              {day.toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-              })}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setDay((d) => addDays(d, 1))}
-            aria-label="Next day"
-            className={ICON_BUTTON}
-          >
-            <ChevronRight className="size-4" />
-          </button>
-          {/* Collapse: a deliberate "close the side panel" control, distinct
-              from the day-nav chevrons so it no longer reads as a stray arrow. */}
-          <button
-            type="button"
-            onClick={() => setCollapsed(true)}
-            aria-label="Collapse to-do list"
-            className={cn(ICON_BUTTON, "ml-0.5")}
-          >
-            <PanelRightClose className="size-4" />
-          </button>
-        </div>
+        <span className="text-sm font-semibold tracking-tight text-muted-foreground group-hover:text-foreground xl:[writing-mode:vertical-rl]">
+          To-Do
+        </span>
       </div>
 
-      {/* A hint chevron at the foot of the collapsed vertical bar (xl only);
+      {/* A hint chevron at the foot of the collapsed vertical rail (xl only);
           fades out on expand. */}
       <ChevronLeft
         aria-hidden
@@ -326,18 +262,69 @@ export function TodoPanel({
         )}
       />
 
-      {/* BODY — the lists + add-item form. On xl it's pinned to the expanded
-          width (xl:w-80) so the width animation reveals it instead of
-          re-wrapping its text each frame; it stays mounted (faded + inert) so
-          the reveal can animate. On mobile there's no width animation, so it's
-          simply hidden when collapsed to keep the bar short. */}
+      {/* EXPANDED CONTENT — header (horizontal title + day nav + collapse) plus
+          the lists and add-item form. Pinned to the expanded width (xl:w-80) so
+          the width animation reveals it rather than re-wrapping text each frame;
+          fades in as the panel opens. Inert + hidden while collapsed so the slim
+          rail stays clean and nothing behind it is tab-reachable. */}
       <div
         inert={collapsed ? true : undefined}
         className={cn(
-          "min-h-0 flex-1 flex-col transition-opacity duration-200 motion-reduce:transition-none xl:w-80",
+          "min-h-0 flex-1 flex-col transition-opacity duration-200 ease-out motion-reduce:transition-none xl:w-80",
           collapsed ? "hidden opacity-0 xl:flex" : "flex opacity-100"
         )}
       >
+        {/* Header: title on the left, day nav + collapse on the right. */}
+        <div className="flex shrink-0 items-center gap-1 border-b px-3 py-2">
+          <h2 className="shrink-0 px-1 text-sm font-semibold tracking-tight">
+            To-Do
+          </h2>
+          <div className="flex min-w-0 flex-1 items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => setDay((d) => addDays(d, -1))}
+              aria-label="Previous day"
+              className={ICON_BUTTON}
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setDay(new Date())}
+              className="min-w-0 flex-1 rounded-md px-1 py-1 text-center transition-colors hover:text-foreground"
+              title="Jump to today"
+            >
+              <span className="block truncate text-sm font-medium leading-tight">
+                {relLabel}
+              </span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {day.toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                })}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDay((d) => addDays(d, 1))}
+              aria-label="Next day"
+              className={ICON_BUTTON}
+            >
+              <ChevronRight className="size-4" />
+            </button>
+            {/* Collapse: a deliberate "close the side panel" control, distinct
+                from the day-nav chevrons so it doesn't read as a stray arrow. */}
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-label="Collapse to-do list"
+              className={cn(ICON_BUTTON, "ml-0.5")}
+            >
+              <PanelRightClose className="size-4" />
+            </button>
+          </div>
+        </div>
+
       {/* Lists */}
       <div className="min-h-0 flex-1 overflow-auto p-2">
         {dayAssignments.length === 0 && dayItems.length === 0 ? (
