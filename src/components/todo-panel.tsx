@@ -15,7 +15,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, ListTodo } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { addDays, isSameDay } from "@/lib/calendar";
 import type { AssignmentItem } from "@/lib/types";
 import type { TodoItemRow } from "@/lib/todo";
@@ -25,7 +25,6 @@ import {
   setTodoItemDoneAction,
   setAssignmentDoneAction,
 } from "@/app/todo/actions";
-import { Input } from "@/components/ui/input";
 import { PICKER_ICON } from "@/lib/input-styles";
 import { cn } from "@/lib/utils";
 
@@ -171,35 +170,12 @@ export function TodoPanel({
     }
   }
 
-  // --- collapsed rail --------------------------------------------------------
-
-  if (collapsed) {
-    return (
-      <div className="flex h-full w-full shrink-0 items-center justify-between gap-2 rounded-xl border bg-card px-2 py-2 xl:w-12 xl:flex-col xl:justify-start xl:px-0 xl:py-3">
-        <button
-          type="button"
-          onClick={() => setCollapsed(false)}
-          aria-label="Expand to-do list"
-          className="flex size-8 items-center justify-center rounded-md hover:bg-accent"
-        >
-          <ListTodo className="size-4" />
-        </button>
-        <span className="text-sm font-semibold tracking-tight text-muted-foreground xl:mt-1 xl:[writing-mode:vertical-rl]">
-          To-Do
-        </span>
-        <button
-          type="button"
-          onClick={() => setCollapsed(false)}
-          aria-label="Expand to-do list"
-          className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent xl:mt-auto"
-        >
-          <ChevronLeft className="size-4" />
-        </button>
-      </div>
-    );
-  }
-
-  // --- expanded panel --------------------------------------------------------
+  // --- one panel that morphs between a slim rail and the full list -----------
+  // Deliberately NOT an early return: the same container stays mounted in both
+  // states so collapsing/expanding can animate. Only cheap properties animate —
+  // the container's width, the title's `transform: rotate()`, and the body's
+  // opacity — so the transition stays smooth. When collapsed the WHOLE bar is a
+  // single button that expands the panel (keyboard-operable too).
 
   const isTodaySelected = isSameDay(day, today);
   const isTomorrow = isSameDay(day, addDays(today, 1));
@@ -209,55 +185,128 @@ export function TodoPanel({
       ? "Tomorrow"
       : day.toLocaleDateString(undefined, { weekday: "long" });
 
+  // Props that turn the collapsed bar into one big expand button. Spread only
+  // while collapsed; the expanded panel is a plain container.
+  const barProps = collapsed
+    ? {
+        role: "button" as const,
+        tabIndex: 0,
+        "aria-label": "Expand to-do list",
+        onClick: () => setCollapsed(false),
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setCollapsed(false);
+          }
+        },
+      }
+    : {};
+
   return (
-    <div className="flex h-full w-full flex-col rounded-xl border bg-card xl:w-80">
-      {/* Header + collapse */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <h2 className="text-sm font-semibold tracking-tight">To-Do</h2>
-        <button
-          type="button"
-          onClick={() => setCollapsed(true)}
-          aria-label="Collapse to-do list"
-          className={ICON_BUTTON}
+    <div
+      {...barProps}
+      className={cn(
+        "group relative flex h-full w-full flex-col overflow-hidden rounded-xl border bg-card outline-none",
+        // The one layout property we animate (the panel "widening"); the calendar
+        // beside it reclaims the freed space. Body content is pinned to the
+        // expanded width below so it is revealed, not re-laid-out, each frame.
+        "transition-[width] duration-300 ease-out motion-reduce:transition-none",
+        collapsed
+          ? "cursor-pointer focus-visible:ring-2 focus-visible:ring-ring xl:w-12"
+          : "xl:w-80"
+      )}
+    >
+      {/* HEADER — one row: the rotating "To-Do" title on the left, day nav on
+          the right (req 1). The title lives in a fixed 48px box that never
+          moves, so expand/collapse only rotates it (vertical ⇄ horizontal). */}
+      <div className={cn("flex shrink-0 items-center", !collapsed && "border-b")}>
+        <div className="flex size-12 shrink-0 items-center justify-center">
+          <h2
+            className={cn(
+              "origin-center whitespace-nowrap text-sm font-semibold tracking-tight transition-transform duration-300 ease-out motion-reduce:transition-none",
+              collapsed
+                ? "text-muted-foreground group-hover:text-foreground xl:rotate-90"
+                : "rotate-0 text-foreground"
+            )}
+          >
+            To-Do
+          </h2>
+        </div>
+
+        {/* Day navigation + collapse. Faded and inert while collapsed so it is
+            neither visible nor tab-reachable behind the slim bar. */}
+        <div
+          inert={collapsed ? true : undefined}
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-0.5 pr-1.5 transition-opacity duration-200 motion-reduce:transition-none",
+            collapsed ? "opacity-0" : "opacity-100"
+          )}
         >
-          <ChevronRight className="size-4" />
-        </button>
+          <button
+            type="button"
+            onClick={() => setDay((d) => addDays(d, -1))}
+            aria-label="Previous day"
+            className={ICON_BUTTON}
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setDay(new Date())}
+            className="min-w-0 flex-1 rounded-md px-1 py-1 text-center transition-colors hover:text-foreground"
+            title="Jump to today"
+          >
+            <span className="block truncate text-sm font-medium leading-tight">
+              {relLabel}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {day.toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+              })}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setDay((d) => addDays(d, 1))}
+            aria-label="Next day"
+            className={ICON_BUTTON}
+          >
+            <ChevronRight className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setCollapsed(true)}
+            aria-label="Collapse to-do list"
+            className={cn(ICON_BUTTON, "ml-0.5")}
+          >
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
       </div>
 
-      {/* Day navigation */}
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setDay((d) => addDays(d, -1))}
-          aria-label="Previous day"
-          className={ICON_BUTTON}
-        >
-          <ChevronLeft className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => setDay(new Date())}
-          className="min-w-0 flex-1 text-center"
-          title="Jump to today"
-        >
-          <div className="text-sm font-medium leading-tight">{relLabel}</div>
-          <div className="truncate text-xs text-muted-foreground">
-            {day.toLocaleDateString(undefined, {
-              month: "short",
-              day: "numeric",
-            })}
-          </div>
-        </button>
-        <button
-          type="button"
-          onClick={() => setDay((d) => addDays(d, 1))}
-          aria-label="Next day"
-          className={ICON_BUTTON}
-        >
-          <ChevronRight className="size-4" />
-        </button>
-      </div>
+      {/* A hint chevron at the foot of the collapsed vertical bar (xl only);
+          fades out on expand. */}
+      <ChevronLeft
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute bottom-3 left-1/2 hidden size-4 -translate-x-1/2 text-muted-foreground transition-opacity duration-200 group-hover:text-foreground motion-reduce:transition-none xl:block",
+          collapsed ? "opacity-100" : "opacity-0"
+        )}
+      />
 
+      {/* BODY — the lists + add-item form. On xl it's pinned to the expanded
+          width (xl:w-80) so the width animation reveals it instead of
+          re-wrapping its text each frame; it stays mounted (faded + inert) so
+          the reveal can animate. On mobile there's no width animation, so it's
+          simply hidden when collapsed to keep the bar short. */}
+      <div
+        inert={collapsed ? true : undefined}
+        className={cn(
+          "min-h-0 flex-1 flex-col transition-opacity duration-200 motion-reduce:transition-none xl:w-80",
+          collapsed ? "hidden opacity-0 xl:flex" : "flex opacity-100"
+        )}
+      >
       {/* Lists */}
       <div className="min-h-0 flex-1 overflow-auto p-2">
         {dayAssignments.length === 0 && dayItems.length === 0 ? (
@@ -358,31 +407,43 @@ export function TodoPanel({
         )}
       </div>
 
-      {/* Add a manual item (with an optional time) to the selected day */}
-      <form onSubmit={addItem} className="flex flex-wrap gap-2 border-t p-2">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Add a to-do…"
-          className="min-w-0 flex-1 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        />
-        {/* Same component + picker styling as the event dialog's time inputs
-            (see @/lib/input-styles) so they read as one consistent control. */}
-        <Input
-          type="time"
-          value={draftTime}
-          onChange={(e) => setDraftTime(e.target.value)}
-          aria-label="Optional time"
-          title="Optional time"
-          className={cn("w-36 shrink-0", PICKER_ICON)}
-        />
-        <button
-          type="submit"
-          disabled={!draft.trim()}
-          className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-        >
-          Add
-        </button>
+      {/* Add a manual item (with an optional time) to the selected day.
+          One bordered container that reads as a SINGLE input (req 2): the task
+          field fills the width, a thin internal divider separates an optional
+          time field, and a "+" submits. `focus-within` lights the whole box, so
+          it feels like one control rather than three. The sub-fields stay
+          transparent (incl. hyper-focus, which otherwise fills inputs) so only
+          the outer container draws a border. */}
+      <form onSubmit={addItem} className="shrink-0 border-t p-2">
+        <div className="flex items-stretch rounded-md border border-input bg-transparent transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Add a to-do…"
+            className="min-w-0 flex-1 rounded-l-md bg-transparent px-2.5 py-1.5 text-sm outline-none placeholder:text-muted-foreground hyper-focus:bg-transparent"
+          />
+          {/* Optional time — shares the container; PICKER_ICON keeps the native
+              clock glyph visible in light / dark / hyper-focus. */}
+          <input
+            type="time"
+            value={draftTime}
+            onChange={(e) => setDraftTime(e.target.value)}
+            aria-label="Optional time"
+            title="Optional time"
+            className={cn(
+              "w-[104px] shrink-0 border-l border-input bg-transparent px-2 py-1.5 text-sm outline-none hyper-focus:bg-transparent",
+              PICKER_ICON
+            )}
+          />
+          <button
+            type="submit"
+            disabled={!draft.trim()}
+            aria-label="Add to-do"
+            className="flex shrink-0 items-center rounded-r-md border-l border-input px-2.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+          >
+            <Plus className="size-4" />
+          </button>
+        </div>
       </form>
 
       {error && (
@@ -390,6 +451,7 @@ export function TodoPanel({
           {error}
         </p>
       )}
+      </div>
     </div>
   );
 }

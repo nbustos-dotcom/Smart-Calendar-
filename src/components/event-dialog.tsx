@@ -21,6 +21,18 @@ import { EVENT_COLORS, colorStyle, type EventColor } from "@/lib/event-colors";
 import { PICKER_ICON } from "@/lib/input-styles";
 import { cn } from "@/lib/utils";
 
+// How long the closing (fade + scale-out) animation runs. Must match the
+// `duration-*` utility on the card below so we unmount right as it finishes.
+const CLOSE_MS = 150;
+
+// Users who ask for less motion get instant open/close, no animation.
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
 // Monday-first weekday chips, but we store/emit 0=Sun..6=Sat.
 const WEEKDAY_CHIPS: { value: number; label: string }[] = [
   { value: 1, label: "Mon" },
@@ -70,18 +82,36 @@ export function EventDialog({
   // For a recurring event, whether the edit applies to just this occurrence or
   // the whole series. Ignored for single events / new events.
   const [scope, setScope] = useState<EventScope>("occurrence");
+  // While true, the dialog plays its fade/scale-out before the real close runs.
+  const [closing, setClosing] = useState(false);
 
   const isEditing = target != null;
   const editingRecurringOccurrence =
     isEditing && target.isRecurring && target.occurrenceDate != null;
 
+  // Play the close animation, then run the actual close/submit/delete. Reduced
+  // motion (or a double-trigger) skips straight to the action. Keeps every exit
+  // path — backdrop, Escape, Cancel, Save, Delete — animating consistently.
+  function requestClose(after: () => void) {
+    if (closing) return;
+    if (prefersReducedMotion()) {
+      after();
+      return;
+    }
+    setClosing(true);
+    window.setTimeout(after, CLOSE_MS);
+  }
+
   // Close on Escape, like a native dialog.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") requestClose(onClose);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // requestClose is stable enough for this listener; re-bind only if onClose
+    // changes. (closing is read fresh via the setter guard above.)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose]);
 
   function set<K extends keyof EventFormValues>(
@@ -105,7 +135,7 @@ export function EventDialog({
     // A recurring event needs at least one weekday; otherwise treat as single.
     if (values.isRecurring && values.weekdays.length === 0) return;
     if (values.endTime <= values.startTime) return;
-    onSubmit(values, effectiveScope());
+    requestClose(() => onSubmit(values, effectiveScope()));
   }
 
   // When editing a recurring OCCURRENCE, the scope toggle decides. In every
@@ -122,13 +152,25 @@ export function EventDialog({
     (!values.isRecurring || values.weekdays.length > 0);
 
   return (
-    // Backdrop — click outside the card to dismiss.
+    // Backdrop — click outside the card to dismiss. Fades in on open and out on
+    // close; motion-safe so reduced-motion users get no animation.
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+      className={cn(
+        "fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4",
+        closing
+          ? "motion-safe:animate-out motion-safe:fade-out-0 motion-safe:duration-150"
+          : "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+      )}
+      onClick={() => requestClose(onClose)}
     >
       <div
-        className="w-full max-w-md rounded-xl border bg-card p-5 shadow-xl"
+        className={cn(
+          "w-full max-w-md rounded-xl border bg-card p-5 shadow-xl",
+          // A subtle fade + scale, the standard polished-modal feel.
+          closing
+            ? "motion-safe:animate-out motion-safe:fade-out-0 motion-safe:zoom-out-95 motion-safe:duration-150"
+            : "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
+        )}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -295,7 +337,7 @@ export function EventDialog({
                 type="button"
                 variant="ghost"
                 className="text-destructive hover:text-destructive"
-                onClick={() => onDelete(effectiveScope())}
+                onClick={() => requestClose(() => onDelete(effectiveScope()))}
               >
                 Delete
               </Button>
@@ -303,7 +345,11 @@ export function EventDialog({
               <span />
             )}
             <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={onClose}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => requestClose(onClose)}
+              >
                 Cancel
               </Button>
               <Button type="submit" disabled={!canSave}>
