@@ -17,6 +17,7 @@
 // ============================================================================
 
 import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { addDays, isSameDay, monthGrid, startOfDay } from "@/lib/calendar";
 import type { AssignmentItem, ClassEventItem } from "@/lib/types";
 import {
@@ -376,20 +377,34 @@ export function CalendarView({
     <div className="flex h-full min-h-0 flex-col gap-2.5">
       {/* Toolbar */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => move(-1)}>
-            ← Prev
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
+        {/* Bare date-nav controls: chevron-only arrows with "Today" as plain
+            clickable text between them (no button "bubbles"). Each arrow keeps
+            a small icon but gets generous padding so the click target is
+            comfortably larger than the glyph. */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => move(-1)}
+            aria-label="Previous"
+            className="inline-flex items-center justify-center rounded-md p-2 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ChevronLeft className="size-5" />
+          </button>
+          <button
+            type="button"
             onClick={() => setAnchor(new Date())}
+            className="rounded-md px-2 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             Today
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => move(1)}>
-            Next →
-          </Button>
+          </button>
+          <button
+            type="button"
+            onClick={() => move(1)}
+            aria-label="Next"
+            className="inline-flex items-center justify-center rounded-md p-2 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ChevronRight className="size-5" />
+          </button>
           <span className="ml-1 text-sm font-medium">
             {anchor.toLocaleDateString(undefined, {
               month: "long",

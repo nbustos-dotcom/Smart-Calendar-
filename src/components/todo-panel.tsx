@@ -25,13 +25,16 @@ import {
   setTodoItemDoneAction,
   setAssignmentDoneAction,
 } from "@/app/todo/actions";
+import { Input } from "@/components/ui/input";
+import { PICKER_ICON } from "@/lib/input-styles";
 import { cn } from "@/lib/utils";
 
-// Native time-picker indicator: clear, clickable, and visible in every theme
-// (the browser's default glyph is dark and vanishes on dark / hyper-focus, so
-// we invert it there).
-const PICKER_ICON =
-  "[&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 dark:[&::-webkit-calendar-picker-indicator]:invert hyper-focus:[&::-webkit-calendar-picker-indicator]:invert";
+// Lean, bare icon-button styling shared by the card's arrows (collapse +
+// day nav). No border/background "bubble" — just the icon, with generous
+// padding so the click/tap target is comfortably larger than the icon itself
+// while the glyph stays its normal size.
+const ICON_BUTTON =
+  "inline-flex items-center justify-center rounded-md p-2 text-muted-foreground transition-colors hover:text-foreground";
 
 // Local YYYY-MM-DD for a Date (matches how the migration stores todo_items.day).
 function ymd(d: Date): string {
@@ -215,7 +218,7 @@ export function TodoPanel({
           type="button"
           onClick={() => setCollapsed(true)}
           aria-label="Collapse to-do list"
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
+          className={ICON_BUTTON}
         >
           <ChevronRight className="size-4" />
         </button>
@@ -227,7 +230,7 @@ export function TodoPanel({
           type="button"
           onClick={() => setDay((d) => addDays(d, -1))}
           aria-label="Previous day"
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
+          className={ICON_BUTTON}
         >
           <ChevronLeft className="size-4" />
         </button>
@@ -249,7 +252,7 @@ export function TodoPanel({
           type="button"
           onClick={() => setDay((d) => addDays(d, 1))}
           aria-label="Next day"
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
+          className={ICON_BUTTON}
         >
           <ChevronRight className="size-4" />
         </button>
@@ -363,16 +366,15 @@ export function TodoPanel({
           placeholder="Add a to-do…"
           className="min-w-0 flex-1 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
         />
-        <input
+        {/* Same component + picker styling as the event dialog's time inputs
+            (see @/lib/input-styles) so they read as one consistent control. */}
+        <Input
           type="time"
           value={draftTime}
           onChange={(e) => setDraftTime(e.target.value)}
           aria-label="Optional time"
           title="Optional time"
-          className={cn(
-            "w-[132px] shrink-0 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
-            PICKER_ICON
-          )}
+          className={cn("w-36 shrink-0", PICKER_ICON)}
         />
         <button
           type="submit"

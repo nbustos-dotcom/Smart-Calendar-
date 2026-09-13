@@ -18,13 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EVENT_COLORS, colorStyle, type EventColor } from "@/lib/event-colors";
+import { PICKER_ICON } from "@/lib/input-styles";
 import { cn } from "@/lib/utils";
-
-// Styling for the native date/time picker indicator so it's a clear, clickable
-// target and stays visible in every theme: the browser's default glyph is dark,
-// which vanishes on the dark / hyper-focus backgrounds, so we invert it there.
-const PICKER_ICON =
-  "[&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 dark:[&::-webkit-calendar-picker-indicator]:invert hyper-focus:[&::-webkit-calendar-picker-indicator]:invert";
 
 // Monday-first weekday chips, but we store/emit 0=Sun..6=Sat.
 const WEEKDAY_CHIPS: { value: number; label: string }[] = [
