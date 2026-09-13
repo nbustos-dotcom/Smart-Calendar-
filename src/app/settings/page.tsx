@@ -9,6 +9,7 @@ import { getConnectionStatus } from "@/lib/canvas-connection";
 import { listSettingsCourses } from "@/lib/courses";
 import { SettingsForm } from "@/components/settings-form";
 import { CourseManager } from "@/components/course-manager";
+import { GoogleCalendarSection } from "@/components/google-calendar-section";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Card,
@@ -65,6 +66,10 @@ export default async function SettingsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Self-contained Google Calendar connection (OAuth). Fetches its own
+          status and renders its own card, so it can be moved as one unit. */}
+      <GoogleCalendarSection />
 
       <Card>
         <CardHeader>
