@@ -16,6 +16,7 @@ import {
 } from "@/lib/canvas-connection";
 import { getSelf } from "@/lib/canvas";
 import { syncCanvas } from "@/lib/sync";
+import { runPlanner } from "@/lib/study-blocks";
 import { hideCourse, unhideCourse } from "@/lib/courses";
 
 export type ActionState = { ok: boolean; message: string } | null;
@@ -57,6 +58,15 @@ export async function clearTokenAction(): Promise<ActionState> {
 
 export async function syncNowAction(): Promise<ActionState> {
   const result = await syncCanvas();
+  // After a successful sync, refresh the study schedule so new deadlines get
+  // study time immediately. Non-fatal: a planner hiccup never fails the sync.
+  if (result.ok) {
+    try {
+      await runPlanner();
+    } catch {
+      // ignore — the sync itself succeeded; the user can re-plan manually.
+    }
+  }
   revalidatePath("/settings");
   revalidatePath("/");
   if (result.ok) {

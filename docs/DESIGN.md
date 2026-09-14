@@ -119,15 +119,36 @@ The heart of it — a snapshot of everything due.
 - `html_url` (text — deep link back to Canvas so the student can open the real thing)
 - `updated_at`
 
-### `study_blocks` *(added in Phase 3, not before)*
-The scheduler's output — suggested times to work. Kept separate from `assignments`
+### `exams` *(scheduler phase)*
+Tests the student enters — Canvas can't reliably expose exams, and they're
+spacing-driven, not deadline-driven.
+- `id` (uuid), `user_id` (uuid)
+- `title` (text), `course_name` (text, nullable)
+- `exam_at` (timestamp — when the test is)
+- `est_prep_minutes` (int, nullable — the student's estimate of TOTAL prep)
+
+### `assignment_overrides` *(scheduler phase)*
+The student's persisted answers about a Canvas assignment, keyed by
+`canvas_assignment_id` so they SURVIVE re-syncs (the `assignments` snapshot is
+upsert-replaced every sync, so answers can't live on that row).
+- `id` (uuid), `user_id` (uuid), `canvas_assignment_id` (bigint)
+- `task_category` (text, nullable — the confirmed type; once set we never re-ask)
+- `est_minutes` (int, nullable — a per-assignment student estimate)
+- `skip` (bool — opt an assignment out of scheduling)
+
+### `study_blocks` *(scheduler phase)*
+The scheduler's output — concrete times to work. Kept separate from `assignments`
 so we never confuse "what Canvas said" with "what we suggested."
-- `id` (uuid)
-- `user_id` (uuid)
-- `assignment_id` (uuid → assignments.id)
-- `suggested_start` (timestamp)
-- `suggested_end` (timestamp)
+- `id` (uuid), `user_id` (uuid)
+- `source_kind` (text: `assignment` | `exam`) + `canvas_assignment_id` (bigint,
+  nullable) / `exam_id` (uuid → exams.id, nullable)
+- `title` (text), `starts_at` / `ends_at` (timestamp)
+- `state` (text: `scheduled` | `reserved` | `needs_input` — the three-state
+  honesty system, see §7)
 - `reason` (text — the human-readable rule that produced this block)
+- `session_index` / `session_count` (int — "session 2 of 3")
+- `moved_by_user` (bool — set when the student drags the block; the planner then
+  treats it as fixed and schedules around it, never fighting the student)
 
 > **⚠️ Assumption:** we snapshot Canvas data into our DB (rather than fetching live
 > on every page load). This makes the app fast, works when Canvas is slow, and lets
@@ -164,24 +185,70 @@ Handling reality:
 ## 7. The scheduler (deterministic rules)
 
 This is the "smart" part, and it is deliberately *not* clever. It is a short list of
-rules a student could apply by hand. Given the same assignments, it always produces
-the same plan.
+rules a student could apply by hand — **deterministic, no AI/ML anywhere**. Given the
+same inputs it always produces the same plan, so it's trivially unit-testable (feed it
+tasks + busy time, assert the exact blocks). The pure engine lives in
+`src/lib/scheduler.ts`; all tunable numbers live in one place,
+`src/lib/scheduler-config.ts`.
 
-**Draft v1 rules (for review — these are the knobs we'll tune together):**
-1. Only assignments with a real `due_at` in the future get a study block. No due
-   date → no block, shown in a separate "no due date" section (not hidden).
-2. Estimate effort from `points_possible`: a simple, transparent mapping, e.g.
-   `≤ 20 pts → 1 hour`, `21–60 → 2 hours`, `> 60 → 3 hours`. **⚠️ Assumption** — this
-   mapping is a placeholder; you'll want to set the real thresholds.
-3. Place the study block on the day before the due date, in a default working window
-   (e.g. 4–9 PM). **⚠️ Assumption** — window and "days before" are placeholders.
-4. If two blocks collide, push the lower-points one earlier (earlier due date wins
-   ties). No overlaps.
-5. Every block stores its `reason` in plain words, e.g. *"2h suggested the day before
-   because it's worth 45 pts."* The student can always see *why*.
+> This section describes the scheduler as actually built (v1: engine only). The
+> **learning loop** — measuring how long tasks really took, self-correcting the
+> duration buffer, time-of-day/fatigue preferences, learning from drag history,
+> and writing blocks back to Google — is a **later phase** and is deliberately
+> NOT built yet. v1 ships good fixed defaults.
 
-Because it's just rules, the scheduler is the easiest part to unit-test: feed it a
-list of assignments, assert the exact blocks that come out.
+**Two task types, scheduled differently:**
+- **Assignments (Canvas) — deadline-driven.** Place enough work time *before* the due
+  date, split into focus chunks. The type is inferred deterministically from Canvas
+  fields (`submission_types`, `assignment_group_name`, title, points) into a category
+  (reading / quiz / problem_set / lab / essay / project). If the type is genuinely
+  uncertain, the scheduler asks the student **once** and stores the answer
+  (`assignment_overrides`) so it never re-asks.
+- **Exams — spacing-driven.** The student enters them (`exams`). Prep is distributed
+  across several sessions leading up to the test (the spacing effect) rather than
+  massed the night before.
+
+**Duration estimation (defeats the planning fallacy).** A fallback ladder:
+1. the student's own estimate → **×1.4 buffer** (fixed this version);
+2. category history average → *(deferred; no data until the learning loop, so skipped in v1)*;
+3. category default (fixed per-category minutes, used as-is — already padded);
+4. unknown → the task is flagged **Needs Input**.
+When uncertain we over-allocate and start earlier — missing a deadline is worse than
+finishing early.
+
+**Placement.**
+- Assignments backward-schedule from the deadline into real free time (time not taken
+  by class events, the student's own events, Google events, or study blocks they've
+  moved), spread **earliest-first** across the days before the due date, guaranteed to
+  finish before it. Long work is chunked into ≤90-min focus sessions.
+- Exams use the **spacing effect**: one session roughly every `gap` days, where
+  `gap ≈ 0.2 × days-until-test`, always starting earlier over later. A test in 2 days →
+  ~one session per day, not a single block the night before.
+  > **⚠️ Caveat (deliberate v1 approximation).** Using *days-until-test* as the spacing
+  > base is a simplification, **not** a literal implementation of the science. The
+  > spacing-effect literature spaces on the **retention interval** — how long the
+  > material must be retained — which for a real exam is longer than the time until it.
+  > `gap ≈ 0.2 × days-until-test` is a reasonable, tunable stand-in for v1
+  > (`SPACING_FRACTION` in the config) and is a known thing to revisit.
+- Multiple competing deadlines are handled by ordering tasks earliest-deadline-first and
+  removing each placed slot from the free pool, so nothing double-books and work spreads
+  across the available time.
+
+**Three-state honesty (surface uncertainty, never guess silently).** Every block is:
+- **Scheduled** — enough info to place it confidently (type known, placed in free time
+  before the deadline);
+- **Reserved** — a placeholder held because it couldn't fully fit before the deadline
+  (an honest "not enough free time" flag) rather than silently dropping the work;
+- **Needs Input** — the type is genuinely unclear, so a small placeholder is held and
+  the student is asked one question (answer stored, never re-asked).
+
+**Interaction.** The scheduler auto-places blocks (it commands). If the student drags a
+study block to a new time/day, that's accepted **silently** (`moved_by_user`) and the
+next plan run schedules around it — v1 just doesn't fight the move (learning *from*
+moves is a later phase).
+
+Every block stores its `reason` in plain words (e.g. *"Work session 2 of 3, placed early
+so it's done before the due date (Wed, Jan 7)."*), so the student can always see *why*.
 
 ---
 

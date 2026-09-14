@@ -16,10 +16,15 @@
 // so edits feel instant; on a failed save we revert that copy.
 // ============================================================================
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { addDays, isSameDay, monthGrid, startOfDay, weekDays } from "@/lib/calendar";
-import type { AssignmentItem, ClassEventItem } from "@/lib/types";
+import type {
+  AssignmentItem,
+  ClassEventItem,
+  ExamItem,
+  StudyBlockItem,
+} from "@/lib/types";
 import {
   expandOccurrencesForRange,
   ymd,
@@ -39,6 +44,13 @@ import {
   type EventScope,
 } from "@/components/event-dialog";
 import { GoogleEventDialog } from "@/components/google-event-dialog";
+import { ExamDialog } from "@/components/exam-dialog";
+import { StudyNeedsInputDialog } from "@/components/study-needs-input-dialog";
+import {
+  runPlannerAction,
+  setStudyBlockTimeAction,
+} from "@/app/scheduler/actions";
+import { GraduationCap } from "lucide-react";
 import {
   createEventAction,
   deleteEventAction,
@@ -92,11 +104,15 @@ export function CalendarView({
   events,
   userEvents,
   overrides,
+  exams = [],
+  studyBlocks = [],
 }: {
   assignments: AssignmentItem[];
   events: ClassEventItem[];
   userEvents: UserEventRow[];
   overrides: OverrideRow[];
+  exams?: ExamItem[];
+  studyBlocks?: StudyBlockItem[];
 }) {
   const [mode, setMode] = useState<Mode>("week");
   const [anchor, setAnchor] = useState<Date>(() => new Date());
@@ -114,6 +130,51 @@ export function CalendarView({
   // which is the editable dialog for the user's OWN events.
   const [googleDetail, setGoogleDetail] = useState<ClassEventItem | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // --- Study scheduler UI state ---------------------------------------------
+  // Optimistic local copy of study blocks, seeded once (like localEvents), so a
+  // drag-move shows instantly and a background revalidation can't snap it back.
+  const [localStudyBlocks, setLocalStudyBlocks] = useState<StudyBlockItem[]>(
+    () => studyBlocks
+  );
+  const [examOpen, setExamOpen] = useState(false);
+  const [needsInput, setNeedsInput] = useState<{
+    canvasAssignmentId: number;
+    title: string;
+  } | null>(null);
+  const [planning, startPlanning] = useTransition();
+
+  function planNow() {
+    startPlanning(async () => {
+      const res = await runPlannerAction();
+      if (!res.ok) setErrorMsg(res.error);
+    });
+  }
+
+  // Accept a study-block move: update local state immediately, persist, revert on
+  // failure. No confirmation — moving is always accepted (per the spec).
+  function commitStudyMove(id: string, start: Date, end: Date) {
+    const prev = localStudyBlocks;
+    setLocalStudyBlocks((list) =>
+      list.map((b) =>
+        b.id === id
+          ? { ...b, starts_at: start.toISOString(), ends_at: end.toISOString(), moved_by_user: true }
+          : b
+      )
+    );
+    setStudyBlockTimeAction(id, start.toISOString(), end.toISOString()).then((res) => {
+      if (!res.ok) {
+        setLocalStudyBlocks(prev);
+        setErrorMsg(res.error);
+      }
+    });
+  }
+
+  // Open the one-question dialog for a needs-input study block.
+  function openNeedsInput(block: StudyBlockItem) {
+    if (block.source_kind !== "assignment" || block.canvas_assignment_id == null) return;
+    setNeedsInput({ canvasAssignmentId: block.canvas_assignment_id, title: block.title });
+  }
 
   function move(step: number) {
     setAnchor((prev) => addDays(prev, step * (mode === "week" ? 7 : 30)));
@@ -423,6 +484,18 @@ export function CalendarView({
         <div className="flex items-center gap-1">
           <Button
             size="sm"
+            variant="secondary"
+            onClick={planNow}
+            disabled={planning}
+            title="Auto-place study time around your deadlines and free time"
+          >
+            {planning ? "Planning…" : "Plan my study time"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setExamOpen(true)}>
+            + Exam
+          </Button>
+          <Button
+            size="sm"
             onClick={() => {
               // Default a new event to the next round hour today.
               const now = new Date();
@@ -476,6 +549,10 @@ export function CalendarView({
             onOccurrenceClick={openEdit}
             onCommitTimes={commitTimes}
             onGoogleEventClick={setGoogleDetail}
+            exams={exams}
+            studyBlocks={localStudyBlocks}
+            onStudyMove={commitStudyMove}
+            onNeedsInput={openNeedsInput}
           />
         ) : (
           <MonthView
@@ -486,6 +563,9 @@ export function CalendarView({
             userEvents={localEvents}
             overrides={localOverrides}
             onGoogleEventClick={setGoogleDetail}
+            exams={exams}
+            studyBlocks={localStudyBlocks}
+            onNeedsInput={openNeedsInput}
           />
         )}
       </div>
@@ -504,6 +584,16 @@ export function CalendarView({
         <GoogleEventDialog
           event={googleDetail}
           onClose={() => setGoogleDetail(null)}
+        />
+      )}
+
+      {examOpen && <ExamDialog onClose={() => setExamOpen(false)} />}
+
+      {needsInput && (
+        <StudyNeedsInputDialog
+          canvasAssignmentId={needsInput.canvasAssignmentId}
+          title={needsInput.title}
+          onClose={() => setNeedsInput(null)}
         />
       )}
     </div>
@@ -560,6 +650,21 @@ type DragState = {
   moved: boolean; // crossed the click/drag threshold?
 };
 
+// A live MOVE of one study block. Study blocks are move-only (no resize): the
+// student can drag them to a different time/day and we accept it silently. Kept
+// separate from the user-event drag so that machinery stays untouched.
+type StudyDragState = {
+  block: StudyBlockItem;
+  pointerStart: { x: number; y: number };
+  origStartMin: number;
+  origEndMin: number;
+  origDayIndex: number;
+  dayIndex: number;
+  startMin: number;
+  endMin: number;
+  moved: boolean;
+};
+
 function WeekView({
   anchor,
   today,
@@ -571,6 +676,10 @@ function WeekView({
   onOccurrenceClick,
   onCommitTimes,
   onGoogleEventClick,
+  exams,
+  studyBlocks,
+  onStudyMove,
+  onNeedsInput,
 }: {
   anchor: Date;
   today: Date;
@@ -582,6 +691,10 @@ function WeekView({
   onOccurrenceClick: (occ: EventOccurrence) => void;
   onCommitTimes: (occ: EventOccurrence, start: Date, end: Date) => void;
   onGoogleEventClick: (event: ClassEventItem) => void;
+  exams: ExamItem[];
+  studyBlocks: StudyBlockItem[];
+  onStudyMove: (id: string, start: Date, end: Date) => void;
+  onNeedsInput: (block: StudyBlockItem) => void;
 }) {
 
   // Refs used to auto-scroll the grid to the user's day on load (see effect).
@@ -793,6 +906,111 @@ function WeekView({
       dayIndex: Math.max(0, days.findIndex((d) => isSameDay(d, occ.start))),
       startMin,
       endMin: Math.max(minutesOfDay(occ.end), startMin + SNAP_MIN),
+    };
+  }
+
+  // --- Study-block move drag (self-contained, move-only) ---------------------
+  const [studyDrag, setStudyDrag] = useState<StudyDragState | null>(null);
+  const studyDragRef = useRef<StudyDragState | null>(null);
+  const onStudyMoveRef = useRef(onStudyMove);
+  onStudyMoveRef.current = onStudyMove;
+  const onNeedsInputRef = useRef(onNeedsInput);
+  onNeedsInputRef.current = onNeedsInput;
+
+  useEffect(() => {
+    function onMove(e: PointerEvent) {
+      const d = studyDragRef.current;
+      if (!d) return;
+      const dx = e.clientX - d.pointerStart.x;
+      const dy = e.clientY - d.pointerStart.y;
+      const deltaMin = Math.round(((dy / HOUR_PX) * 60) / SNAP_MIN) * SNAP_MIN;
+      const moved =
+        d.moved || Math.abs(dx) > CLICK_SLOP_PX || Math.abs(dy) > CLICK_SLOP_PX;
+      const { minHour, maxHour } = rangeRef.current;
+      const dayMin = minHour * 60;
+      const dayMax = maxHour * 60;
+      const dur = d.origEndMin - d.origStartMin;
+      const startMin = Math.max(dayMin, Math.min(d.origStartMin + deltaMin, dayMax - dur));
+      const next: StudyDragState = {
+        ...d,
+        moved,
+        startMin,
+        endMin: startMin + dur,
+        dayIndex: pointerDayIndex(e.clientX, d.origDayIndex),
+      };
+      studyDragRef.current = next;
+      setStudyDrag(next);
+    }
+    function onUp() {
+      const d = studyDragRef.current;
+      if (!d) return;
+      studyDragRef.current = null;
+      setStudyDrag(null);
+      if (!d.moved) {
+        // A click (no move): if it's a needs-input placeholder, ask the question.
+        if (d.block.state === "needs_input") onNeedsInputRef.current(d.block);
+        return;
+      }
+      const day = daysRef.current[d.dayIndex];
+      onStudyMoveRef.current(
+        d.block.id,
+        dateAtDayMinute(day, d.startMin),
+        dateAtDayMinute(day, d.endMin)
+      );
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function startStudyDrag(e: React.PointerEvent, block: StudyBlockItem) {
+    e.preventDefault();
+    e.stopPropagation();
+    const start = new Date(block.starts_at);
+    const end = new Date(block.ends_at);
+    const startMin = minutesOfDay(start);
+    const endMin = Math.max(minutesOfDay(end), startMin + SNAP_MIN);
+    const dayIndex = Math.max(0, days.findIndex((d) => isSameDay(d, start)));
+    const state: StudyDragState = {
+      block,
+      pointerStart: { x: e.clientX, y: e.clientY },
+      origStartMin: startMin,
+      origEndMin: endMin,
+      origDayIndex: dayIndex,
+      dayIndex,
+      startMin,
+      endMin,
+      moved: false,
+    };
+    studyDragRef.current = state;
+    setStudyDrag(state);
+  }
+
+  // Effective column/time of a study block — its live drag preview if it's the
+  // one being dragged, else its stored time. Lets a drag preview cross columns.
+  function effectiveStudyPos(block: StudyBlockItem): {
+    dayIndex: number;
+    startMin: number;
+    endMin: number;
+  } {
+    if (studyDrag && studyDrag.block.id === block.id) {
+      return {
+        dayIndex: studyDrag.dayIndex,
+        startMin: studyDrag.startMin,
+        endMin: studyDrag.endMin,
+      };
+    }
+    const start = new Date(block.starts_at);
+    const end = new Date(block.ends_at);
+    const startMin = minutesOfDay(start);
+    return {
+      dayIndex: Math.max(0, days.findIndex((d) => isSameDay(d, start))),
+      startMin,
+      endMin: Math.max(minutesOfDay(end), startMin + SNAP_MIN),
     };
   }
 
@@ -1185,6 +1403,73 @@ function WeekView({
                       </div>
                     );
                   })}
+
+                  {/* Exam markers — read-only red pins at the test time. */}
+                  {exams
+                    .filter((e) => isSameDay(new Date(e.exam_at), day))
+                    .map((e) => {
+                      const top = Math.max(0, yFor(minutesOfDay(new Date(e.exam_at))));
+                      return (
+                        <div
+                          key={`ex-${e.id}`}
+                          onClick={(evt) => evt.stopPropagation()}
+                          className="pointer-events-none absolute inset-x-1 z-20 truncate rounded border-l-4 border-red-500 bg-red-500/15 px-1 py-0.5 text-[10px] font-semibold text-red-900 shadow-sm dark:text-red-100 hyper-focus:text-red-100"
+                          style={{ top }}
+                          title={`Exam: ${e.title}`}
+                        >
+                          Test · {e.title}
+                        </div>
+                      );
+                    })}
+
+                  {/* Study blocks — the scheduler's output. A distinct violet,
+                      draggable (move-only, accepted silently), with three-state
+                      cues: scheduled (solid), reserved (dashed/faded), needs_input
+                      (amber dashed, click to answer one question). Placed in free
+                      time, so full width is safe. */}
+                  {studyBlocks
+                    .map((b) => ({ b, ...effectiveStudyPos(b) }))
+                    .filter((x) => x.dayIndex === dayIndex)
+                    .map(({ b, startMin, endMin }) => {
+                      const top = Math.max(0, yFor(startMin));
+                      const h = Math.max(
+                        MIN_BLOCK_PX,
+                        Math.min(yFor(endMin) - top, totalHeight - top)
+                      );
+                      const dragging = studyDrag?.block.id === b.id;
+                      const needs = b.state === "needs_input";
+                      const reserved = b.state === "reserved";
+                      return (
+                        <div
+                          key={`sb-${b.id}`}
+                          onPointerDown={(e) => startStudyDrag(e, b)}
+                          onClick={(e) => e.stopPropagation()}
+                          className={cn(
+                            "group absolute z-30 cursor-grab touch-none select-none overflow-hidden rounded-md border-l-4 px-1 py-0.5 text-[11px] leading-tight shadow-sm",
+                            needs
+                              ? "border-dashed border-amber-500 bg-amber-500/15 text-amber-950 dark:text-amber-100 hyper-focus:text-amber-100"
+                              : "border-violet-500 bg-violet-500/15 text-violet-950 dark:text-violet-100 hyper-focus:text-violet-100",
+                            reserved && "border-dashed opacity-80",
+                            dragging &&
+                              "z-40 cursor-grabbing opacity-90 shadow-lg ring-2 ring-foreground/30"
+                          )}
+                          style={{ top, height: h, left: "2px", width: "calc(100% - 6px)" }}
+                          title={b.reason ?? b.title}
+                        >
+                          <div className="flex items-center gap-1 font-medium">
+                            <GraduationCap className="size-3 shrink-0" />
+                            <span className="line-clamp-2 break-words">
+                              {needs ? `${b.title} — set type` : b.title}
+                            </span>
+                          </div>
+                          {h > 34 && (
+                            <div className="truncate opacity-80">
+                              {formatMinutes(startMin)}–{formatMinutes(endMin)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                 </div>
               );
             })}
@@ -1235,6 +1520,9 @@ function MonthView({
   userEvents,
   overrides,
   onGoogleEventClick,
+  exams,
+  studyBlocks,
+  onNeedsInput,
 }: {
   anchor: Date;
   today: Date;
@@ -1243,6 +1531,9 @@ function MonthView({
   userEvents: UserEventRow[];
   overrides: OverrideRow[];
   onGoogleEventClick: (event: ClassEventItem) => void;
+  exams: ExamItem[];
+  studyBlocks: StudyBlockItem[];
+  onNeedsInput: (block: StudyBlockItem) => void;
 }) {
   const weeks = monthGrid(anchor.getFullYear(), anchor.getMonth());
   const currentMonth = anchor.getMonth();
@@ -1282,11 +1573,19 @@ function MonthView({
             const dayUser = userOccurrences.filter((o) =>
               isSameDay(o.start, day)
             );
+            const dayStudy = studyBlocks.filter((s) =>
+              isSameDay(new Date(s.starts_at), day)
+            );
+            const dayExams = exams.filter((e) =>
+              isSameDay(new Date(e.exam_at), day)
+            );
 
             const extra =
               dayEvents.length +
               dayAssignments.length +
-              dayUser.length -
+              dayUser.length +
+              dayStudy.length +
+              dayExams.length -
               4;
 
             return (
@@ -1307,6 +1606,18 @@ function MonthView({
                   {day.getDate()}
                 </div>
                 <div className="flex flex-col gap-1">
+                  {dayExams.slice(0, 1).map((e) => (
+                    <span
+                      key={`ex-${e.id}`}
+                      className="truncate rounded border-l-2 border-red-500 bg-red-500/10 px-1 py-0.5 text-[10px] font-semibold leading-tight text-red-700 dark:text-red-300 hyper-focus:text-red-200"
+                      title={`Exam: ${e.title}`}
+                    >
+                      Test · {e.title}
+                    </span>
+                  ))}
+                  {dayStudy.slice(0, 2).map((s) => (
+                    <StudyChip key={`sb-${s.id}`} block={s} onNeedsInput={onNeedsInput} />
+                  ))}
                   {dayUser.slice(0, 2).map((o) => (
                     <UserChip key={o.key} color={o.color} label={o.title} />
                   ))}
@@ -1396,6 +1707,35 @@ function MiniChip({
     >
       {google && <GoogleMark />}
       <span className="truncate">{label}</span>
+    </span>
+  );
+}
+
+// A month-view chip for a scheduler study block: distinct violet (or amber
+// dashed for needs-input), with the study icon. needs-input chips are clickable
+// to answer the one question; the rest are read-only in month view.
+function StudyChip({
+  block,
+  onNeedsInput,
+}: {
+  block: StudyBlockItem;
+  onNeedsInput: (block: StudyBlockItem) => void;
+}) {
+  const needs = block.state === "needs_input";
+  return (
+    <span
+      onClick={needs ? () => onNeedsInput(block) : undefined}
+      className={cn(
+        "flex items-center gap-0.5 truncate rounded border-l-2 px-1 py-0.5 text-[10px] leading-tight",
+        needs
+          ? "cursor-pointer border-dashed border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300 hyper-focus:text-amber-200"
+          : "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-300 hyper-focus:text-violet-200",
+        block.state === "reserved" && "border-dashed opacity-80"
+      )}
+      title={block.reason ?? block.title}
+    >
+      <GraduationCap className="size-3 shrink-0" />
+      <span className="truncate">{block.title}</span>
     </span>
   );
 }

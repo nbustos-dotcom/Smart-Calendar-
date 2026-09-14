@@ -13,6 +13,8 @@ import { CalendarView } from "@/components/calendar-view";
 import { TodoPanel } from "@/components/todo-panel";
 import { listTodoItems, listDoneAssignmentIds } from "@/lib/todo";
 import { getGoogleCalendarEvents } from "@/lib/google-calendar";
+import { listExams } from "@/lib/exams";
+import { listStudyBlocks } from "@/lib/study-blocks";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { AssignmentItem, ClassEventItem } from "@/lib/types";
@@ -60,6 +62,8 @@ export default async function HomePage() {
     todoItems,
     doneAssignmentIds,
     googleEvents,
+    exams,
+    studyBlocks,
   ] = await Promise.all([
     getConnectionStatus(),
     supabase
@@ -91,6 +95,9 @@ export default async function HomePage() {
     // Read-only Google Calendar events (primary calendar, bounded window). Returns
     // [] when the user hasn't connected Google, so this is safe to always call.
     getGoogleCalendarEvents(),
+    // Study scheduler: entered exams + the scheduler's placed study blocks.
+    listExams(),
+    listStudyBlocks(),
   ]);
 
   const assignments: AssignmentItem[] = (
@@ -190,6 +197,8 @@ export default async function HomePage() {
                 events={events}
                 userEvents={(userEventRows ?? []) as unknown as UserEventRow[]}
                 overrides={(overrideRows ?? []) as unknown as OverrideRow[]}
+                exams={exams}
+                studyBlocks={studyBlocks}
               />
             </section>
             {/* Width is controlled by TodoPanel itself (collapsed rail vs full

@@ -18,6 +18,30 @@ export type AssignmentItem = {
   graded: boolean; // Canvas: this assignment has been graded (score not shown)
 };
 
+// A student-entered exam (spacing-driven). Rendered as a read-only marker.
+export type ExamItem = {
+  id: string;
+  title: string;
+  course_name: string | null;
+  exam_at: string; // ISO
+  est_prep_minutes: number | null;
+};
+
+// A scheduler-produced study block, as the calendar needs it. Read-mostly:
+// the only edit is dragging it to a new time (accepted silently).
+export type StudyBlockItem = {
+  id: string;
+  source_kind: "assignment" | "exam";
+  canvas_assignment_id: number | null;
+  exam_id: string | null;
+  title: string;
+  starts_at: string; // ISO
+  ends_at: string; // ISO
+  state: "scheduled" | "reserved" | "needs_input";
+  reason: string | null;
+  moved_by_user: boolean;
+};
+
 export type ClassEventItem = {
   id: string;
   title: string;
