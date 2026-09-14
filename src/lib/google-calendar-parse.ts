@@ -7,6 +7,7 @@
 // network code so it can be unit-tested in isolation.
 // ============================================================================
 import type { ClassEventItem } from "@/lib/types";
+import { googleColorHex } from "@/lib/google-colors";
 
 // The slice of the Google Calendar Events resource we read.
 export type RawGoogleEvent = {
@@ -14,7 +15,10 @@ export type RawGoogleEvent = {
   status?: string; // "confirmed" | "tentative" | "cancelled"
   summary?: string;
   location?: string;
-  htmlLink?: string;
+  description?: string;
+  htmlLink?: string; // "view in Google Calendar" link
+  hangoutLink?: string; // Google Meet link, when the event has one
+  colorId?: string; // 1..11 into Google's event colour palette
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
 };
@@ -60,5 +64,9 @@ export function mapGoogleEvent(raw: RawGoogleEvent): ClassEventItem | null {
     html_url: raw.htmlLink ?? null,
     course_name: null,
     source: "google",
+    description: raw.description?.trim() || null,
+    meeting_url: raw.hangoutLink ?? null,
+    // Resolve the colorId to the hex Google uses (default when absent).
+    google_color: googleColorHex(raw.colorId),
   };
 }

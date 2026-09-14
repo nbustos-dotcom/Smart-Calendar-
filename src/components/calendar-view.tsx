@@ -29,6 +29,7 @@ import {
   type UserEventRow,
 } from "@/lib/recurrence";
 import { colorStyle, type EventColor } from "@/lib/event-colors";
+import { hexToRgba } from "@/lib/google-colors";
 import { layoutOverlaps } from "@/lib/overlap-layout";
 import { DayDueDropdown } from "@/components/day-due-dropdown";
 import {
@@ -37,6 +38,7 @@ import {
   type EventFormValues,
   type EventScope,
 } from "@/components/event-dialog";
+import { GoogleEventDialog } from "@/components/google-event-dialog";
 import {
   createEventAction,
   deleteEventAction,
@@ -72,6 +74,8 @@ type GridBlock = {
   startMin: number; // minutes from midnight
   endMin: number; // minutes from midnight
   google?: boolean; // read-only event sourced from Google Calendar
+  googleColor?: string | null; // the event's Google colour (hex), if any
+  googleEvent?: ClassEventItem; // the source event, for the read-only detail view
 };
 
 // What the create/edit dialog is currently working on. `target` is null for a
@@ -106,6 +110,9 @@ export function CalendarView({
     () => overrides
   );
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  // The clicked Google event (read-only detail view). Separate from `dialog`,
+  // which is the editable dialog for the user's OWN events.
+  const [googleDetail, setGoogleDetail] = useState<ClassEventItem | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   function move(step: number) {
@@ -468,6 +475,7 @@ export function CalendarView({
             onSlotClick={openCreate}
             onOccurrenceClick={openEdit}
             onCommitTimes={commitTimes}
+            onGoogleEventClick={setGoogleDetail}
           />
         ) : (
           <MonthView
@@ -477,6 +485,7 @@ export function CalendarView({
             events={events}
             userEvents={localEvents}
             overrides={localOverrides}
+            onGoogleEventClick={setGoogleDetail}
           />
         )}
       </div>
@@ -488,6 +497,13 @@ export function CalendarView({
           onSubmit={onDialogSubmit}
           onDelete={onDialogDelete}
           onClose={() => setDialog(null)}
+        />
+      )}
+
+      {googleDetail && (
+        <GoogleEventDialog
+          event={googleDetail}
+          onClose={() => setGoogleDetail(null)}
         />
       )}
     </div>
@@ -554,6 +570,7 @@ function WeekView({
   onSlotClick,
   onOccurrenceClick,
   onCommitTimes,
+  onGoogleEventClick,
 }: {
   anchor: Date;
   today: Date;
@@ -564,6 +581,7 @@ function WeekView({
   onSlotClick: (day: Date, startMin: number) => void;
   onOccurrenceClick: (occ: EventOccurrence) => void;
   onCommitTimes: (occ: EventOccurrence, start: Date, end: Date) => void;
+  onGoogleEventClick: (event: ClassEventItem) => void;
 }) {
 
   // Refs used to auto-scroll the grid to the user's day on load (see effect).
@@ -603,6 +621,8 @@ function WeekView({
         startMin,
         endMin,
         google: e.source === "google",
+        googleColor: e.source === "google" ? e.google_color ?? null : null,
+        googleEvent: e.source === "google" ? e : undefined,
       });
     }
 
@@ -914,15 +934,26 @@ function WeekView({
                   <div className="flex flex-col gap-1">
                     {allDay.map((e) => {
                       const isGoogle = e.source === "google";
+                      const gStyle: React.CSSProperties | undefined =
+                        isGoogle && e.google_color
+                          ? {
+                              borderLeftColor: e.google_color,
+                              backgroundColor: hexToRgba(e.google_color, 0.16),
+                            }
+                          : undefined;
                       return (
                         <div
                           key={e.id}
+                          onClick={
+                            isGoogle ? () => onGoogleEventClick(e) : undefined
+                          }
                           className={cn(
                             "flex items-center gap-0.5 truncate rounded border-l-2 px-1 py-0.5 text-[11px]",
                             isGoogle
-                              ? "border-dashed border-muted-foreground/50 bg-muted/50 text-foreground/80"
+                              ? "cursor-pointer border-l-4 text-foreground/90"
                               : "border-blue-500 bg-blue-500/10"
                           )}
+                          style={gStyle}
                           title={
                             isGoogle
                               ? `${e.title} — from Google Calendar (read-only)`
@@ -930,7 +961,11 @@ function WeekView({
                           }
                         >
                           {isGoogle && <GoogleMark />}
-                          <ItemLink href={e.html_url}>{e.title}</ItemLink>
+                          {isGoogle ? (
+                            <span className="truncate">{e.title}</span>
+                          ) : (
+                            <ItemLink href={e.html_url}>{e.title}</ItemLink>
+                          )}
                         </div>
                       );
                     })}
@@ -1035,12 +1070,28 @@ function WeekView({
                       const b = item.block;
                       const isAssignment = b.kind === "assignment";
                       const isGoogle = b.google === true;
+                      // Google events render in their real Google colour as a
+                      // solid left edge + a subtle tint, with theme-token TEXT so
+                      // contrast is guaranteed in light/dark/hyper-focus.
+                      const googleStyle: React.CSSProperties | undefined =
+                        isGoogle && b.googleColor
+                          ? {
+                              borderLeftColor: b.googleColor,
+                              backgroundColor: hexToRgba(b.googleColor, 0.16),
+                            }
+                          : undefined;
                       return (
                         <div
                           key={item.key}
-                          // Swallow the click so it doesn't open the "new event"
-                          // dialog; nothing here is editable.
-                          onClick={(e) => e.stopPropagation()}
+                          // Google → open the read-only detail view. Canvas items
+                          // aren't interactive; swallow so they don't open the
+                          // "new event" dialog.
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isGoogle && b.googleEvent) {
+                              onGoogleEventClick(b.googleEvent);
+                            }
+                          }}
                           className={cn(
                             // Tight horizontal padding so narrow (split) blocks
                             // fit more characters per line.
@@ -1048,31 +1099,37 @@ function WeekView({
                             isAssignment
                               ? "border-l-4 border-amber-500 bg-amber-500/15 text-amber-950 shadow-sm dark:text-amber-100 hyper-focus:bg-amber-500/25 hyper-focus:text-amber-100"
                               : isGoogle
-                                ? // Google events: understated, neutral theme-token
-                                  // styling (a dashed left edge to read "external /
-                                  // not editable here") — distinct from Canvas's
-                                  // solid blue without shouting a new colour.
-                                  "border-l-2 border-dashed border-muted-foreground/50 bg-muted/50 text-foreground/80"
+                                ? // Google: real colour via inline style below; a
+                                  // solid-but-thin left edge + theme-token text.
+                                  "cursor-pointer border-l-4 text-foreground/90 shadow-sm"
                                 : "border-l-2 border-blue-300 bg-blue-500/5 text-blue-800/80 dark:border-blue-400/40 dark:text-blue-200/70 hyper-focus:text-blue-200/80"
                           )}
-                          style={{ top: blockTop, height, left, width }}
+                          style={{ top: blockTop, height, left, width, ...googleStyle }}
                           title={
                             isGoogle
                               ? `${b.title} — from Google Calendar (read-only)`
                               : `${b.title} — ${b.subtitle}`
                           }
                         >
-                          <div
-                            className={cn(
-                              // Wrap the title over up to 2 lines (clipped to the
-                              // block height) instead of truncating on one line,
-                              // so thin split blocks stay readable.
-                              "line-clamp-2 break-words",
-                              isAssignment ? "font-semibold" : "font-normal"
-                            )}
-                          >
+                          <div className="flex items-start gap-0.5">
                             {isGoogle && <GoogleMark />}
-                            <ItemLink href={b.href}>{b.title}</ItemLink>
+                            <div
+                              className={cn(
+                                // Wrap the title over up to 2 lines (clipped to
+                                // the block height) instead of truncating on one
+                                // line, so thin split blocks stay readable. The
+                                // marker sits OUTSIDE this -webkit-box clamp (a
+                                // flex sibling) so it actually renders.
+                                "min-w-0 line-clamp-2 break-words",
+                                isAssignment ? "font-semibold" : "font-normal"
+                              )}
+                            >
+                              {isGoogle ? (
+                                b.title
+                              ) : (
+                                <ItemLink href={b.href}>{b.title}</ItemLink>
+                              )}
+                            </div>
                           </div>
                           {height > 34 && (
                             <div
@@ -1177,6 +1234,7 @@ function MonthView({
   events,
   userEvents,
   overrides,
+  onGoogleEventClick,
 }: {
   anchor: Date;
   today: Date;
@@ -1184,6 +1242,7 @@ function MonthView({
   events: ClassEventItem[];
   userEvents: UserEventRow[];
   overrides: OverrideRow[];
+  onGoogleEventClick: (event: ClassEventItem) => void;
 }) {
   const weeks = monthGrid(anchor.getFullYear(), anchor.getMonth());
   const currentMonth = anchor.getMonth();
@@ -1254,14 +1313,20 @@ function MonthView({
                   {dayAssignments.slice(0, 2).map((a) => (
                     <MiniChip key={a.id} color="amber" label={a.title} />
                   ))}
-                  {dayEvents.slice(0, 1).map((e) => (
-                    <MiniChip
-                      key={e.id}
-                      color="blue"
-                      google={e.source === "google"}
-                      label={e.title}
-                    />
-                  ))}
+                  {dayEvents.slice(0, 1).map((e) =>
+                    e.source === "google" ? (
+                      <MiniChip
+                        key={e.id}
+                        color="blue"
+                        google
+                        googleColor={e.google_color}
+                        label={e.title}
+                        onClick={() => onGoogleEventClick(e)}
+                      />
+                    ) : (
+                      <MiniChip key={e.id} color="blue" label={e.title} />
+                    )
+                  )}
                   {extra > 0 && (
                     <span className="text-[10px] text-muted-foreground">
                       +{extra} more
@@ -1297,26 +1362,37 @@ function MiniChip({
   color,
   label,
   google,
+  googleColor,
+  onClick,
 }: {
   color: "blue" | "amber";
   label: string;
-  // Google-sourced (read-only): understated neutral styling + the G mark,
-  // instead of the loud Canvas colours.
+  // Google-sourced (read-only): the event's real Google colour as a tint + a
+  // solid left edge, theme-token text, and the G mark. Clickable → detail view.
   google?: boolean;
+  googleColor?: string | null;
+  onClick?: () => void;
 }) {
+  const gStyle: React.CSSProperties | undefined =
+    google && googleColor
+      ? {
+          borderLeftColor: googleColor,
+          backgroundColor: hexToRgba(googleColor, 0.16),
+        }
+      : undefined;
   return (
     <span
+      onClick={onClick}
       className={cn(
         "flex items-center gap-0.5 truncate rounded px-1 py-0.5 text-[10px] leading-tight",
         google
-          ? "bg-muted text-foreground/80"
+          ? "cursor-pointer border-l-2 text-foreground/90"
           : color === "blue"
             ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 hyper-focus:text-blue-200"
             : "bg-amber-500/10 text-amber-700 dark:text-amber-300 hyper-focus:text-amber-200"
       )}
-      title={
-        google ? `${label} — from Google Calendar (read-only)` : label
-      }
+      style={gStyle}
+      title={google ? `${label} — from Google Calendar (read-only)` : label}
     >
       {google && <GoogleMark />}
       <span className="truncate">{label}</span>

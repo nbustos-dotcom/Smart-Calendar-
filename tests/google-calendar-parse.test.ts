@@ -21,7 +21,25 @@ describe("mapGoogleEvent", () => {
       html_url: "https://calendar.google.com/event?eid=abc123",
       course_name: null,
       source: "google",
+      description: null,
+      meeting_url: null,
+      google_color: "#039BE5", // default (no colorId)
     });
+  });
+
+  it("carries description, meeting link, and the resolved colorId hex", () => {
+    const row = mapGoogleEvent({
+      id: "x",
+      summary: "Standup",
+      description: "Daily sync\nhttps://notes.example.com",
+      hangoutLink: "https://meet.google.com/abc-defg-hij",
+      colorId: "11", // Tomato
+      start: { dateTime: "2026-09-10T14:00:00Z" },
+      end: { dateTime: "2026-09-10T14:15:00Z" },
+    });
+    expect(row?.description).toBe("Daily sync\nhttps://notes.example.com");
+    expect(row?.meeting_url).toBe("https://meet.google.com/abc-defg-hij");
+    expect(row?.google_color).toBe("#D50000"); // Tomato
   });
 
   it("maps an all-day event (date) to local midnight so it reads as all-day", () => {

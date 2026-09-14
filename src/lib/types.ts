@@ -30,4 +30,9 @@ export type ClassEventItem = {
   // "canvas"); Google Calendar events set "google" so the UI can mark them as
   // read-only-from-Google. Both are equally non-interactive in this app.
   source?: "canvas" | "google";
+  // Google-only extras (used by the read-only Google detail view + colouring).
+  // Canvas events leave these unset.
+  description?: string | null; // event description / notes
+  meeting_url?: string | null; // e.g. a Google Meet link (hangoutLink)
+  google_color?: string | null; // resolved hex for the event's colorId
 };

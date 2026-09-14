@@ -76,6 +76,9 @@ async function fetchEvents(
     singleEvents: "true", // expand recurring events into concrete instances
     orderBy: "startTime",
     maxResults: "250",
+    // Only the fields we render — includes the detail-view + colour fields.
+    fields:
+      "items(id,status,summary,location,description,htmlLink,hangoutLink,colorId,start,end)",
   });
   return fetch(`${EVENTS_ENDPOINT}?${params.toString()}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
