@@ -4,8 +4,10 @@
 // STUDY SCHEDULER — server actions (the write path for the scheduler feature)
 //
 // All run on the server as the signed-in user, so per-user RLS keeps each
-// student to their own rows. Nothing here writes to Canvas or Google.
-//   * runPlannerAction        — (re)generate the schedule
+// student to their own rows. Nothing here writes to Canvas or Google. The
+// planner itself runs AUTOMATICALLY (on dashboard load / after sync) — there is
+// no manual "plan now" trigger. These actions change inputs and let the
+// automatic pass pick them up.
 //   * setStudyBlockTimeAction — accept a student's manual move (silently)
 //   * addExamAction / deleteExamAction — manage entered exams
 //   * setAssignmentTypeAction — answer a "needs input" question, once
@@ -13,7 +15,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { runPlanner } from "@/lib/study-blocks";
+import { ensureSchedulePlanned } from "@/lib/study-blocks";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -23,15 +25,6 @@ async function requireUser() {
     data: { user },
   } = await supabase.auth.getUser();
   return { supabase, user };
-}
-
-// Regenerate the schedule. Called by the "Plan my study time" button and at the
-// end of a Canvas sync.
-export async function runPlannerAction(): Promise<ActionResult> {
-  const res = await runPlanner();
-  if (!res.ok) return { ok: false, error: res.error ?? "Could not plan." };
-  revalidatePath("/");
-  return { ok: true };
 }
 
 // Accept a student's drag of a study block: update its time and mark it as
@@ -85,7 +78,7 @@ export async function addExamAction(input: {
   });
   if (error) return { ok: false, error: error.message };
 
-  await runPlanner();
+  await ensureSchedulePlanned();
   revalidatePath("/");
   return { ok: true };
 }
@@ -98,7 +91,7 @@ export async function deleteExamAction(id: string): Promise<ActionResult> {
   const { error } = await supabase.from("exams").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
 
-  await runPlanner();
+  await ensureSchedulePlanned();
   revalidatePath("/");
   return { ok: true };
 }
@@ -128,7 +121,7 @@ export async function setAssignmentTypeAction(input: {
   );
   if (error) return { ok: false, error: error.message };
 
-  await runPlanner();
+  await ensureSchedulePlanned();
   revalidatePath("/");
   return { ok: true };
 }

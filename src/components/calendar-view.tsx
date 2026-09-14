@@ -16,7 +16,7 @@
 // so edits feel instant; on a failed save we revert that copy.
 // ============================================================================
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { addDays, isSameDay, monthGrid, startOfDay, weekDays } from "@/lib/calendar";
 import type {
@@ -46,11 +46,8 @@ import {
 import { GoogleEventDialog } from "@/components/google-event-dialog";
 import { ExamDialog } from "@/components/exam-dialog";
 import { StudyNeedsInputDialog } from "@/components/study-needs-input-dialog";
-import {
-  runPlannerAction,
-  setStudyBlockTimeAction,
-} from "@/app/scheduler/actions";
-import { GraduationCap } from "lucide-react";
+import { setStudyBlockTimeAction } from "@/app/scheduler/actions";
+import { GraduationCap, Menu } from "lucide-react";
 import {
   createEventAction,
   deleteEventAction,
@@ -138,18 +135,12 @@ export function CalendarView({
     () => studyBlocks
   );
   const [examOpen, setExamOpen] = useState(false);
+  // The "+ create" hamburger menu (holds + Event and + Add exam).
+  const [menuOpen, setMenuOpen] = useState(false);
   const [needsInput, setNeedsInput] = useState<{
     canvasAssignmentId: number;
     title: string;
   } | null>(null);
-  const [planning, startPlanning] = useTransition();
-
-  function planNow() {
-    startPlanning(async () => {
-      const res = await runPlannerAction();
-      if (!res.ok) setErrorMsg(res.error);
-    });
-  }
 
   // Accept a study-block move: update local state immediately, persist, revert on
   // failure. No confirmation — moving is always accepted (per the spec).
@@ -482,28 +473,60 @@ export function CalendarView({
           </span>
         </div>
         <div className="flex items-center gap-1">
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={planNow}
-            disabled={planning}
-            title="Auto-place study time around your deadlines and free time"
-          >
-            {planning ? "Planning…" : "Plan my study time"}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setExamOpen(true)}>
-            + Exam
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => {
-              // Default a new event to the next round hour today.
-              const now = new Date();
-              openCreate(now, (now.getHours() + 1) * 60);
-            }}
-          >
-            + Event
-          </Button>
+          {/* Manual creation lives in a hamburger menu — the scheduler places
+              study time automatically, so the toolbar stays clean (just view
+              toggle + this menu). Manual entry is here for exams Canvas misses
+              and for the student's own events. */}
+          <div className="relative">
+            <Button
+              size="sm"
+              variant="outline"
+              aria-label="Add"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              <Menu className="size-4" />
+            </Button>
+            {menuOpen && (
+              <>
+                {/* Click-away backdrop. */}
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setMenuOpen(false)}
+                  aria-hidden
+                />
+                <div
+                  role="menu"
+                  className="absolute right-0 z-50 mt-1 w-44 overflow-hidden rounded-md border bg-popover py-1 text-popover-foreground shadow-md"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="block w-full px-3 py-1.5 text-left text-sm hover:bg-accent"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      const now = new Date();
+                      openCreate(now, (now.getHours() + 1) * 60);
+                    }}
+                  >
+                    + Event
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="block w-full px-3 py-1.5 text-left text-sm hover:bg-accent"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setExamOpen(true);
+                    }}
+                  >
+                    + Add exam
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <Button
             variant={mode === "week" ? "default" : "outline"}
             size="sm"
@@ -1445,21 +1468,25 @@ function WeekView({
                           onPointerDown={(e) => startStudyDrag(e, b)}
                           onClick={(e) => e.stopPropagation()}
                           className={cn(
-                            "group absolute z-30 cursor-grab touch-none select-none overflow-hidden rounded-md border-l-4 px-1 py-0.5 text-[11px] leading-tight shadow-sm",
+                            // The animated, slowly colour-shifting gradient BORDER
+                            // (study-border / study-border-needs, see globals.css)
+                            // is the "the system placed this" signal — subtle and
+                            // slow, and disabled under prefers-reduced-motion.
+                            "group absolute z-30 cursor-grab touch-none select-none overflow-hidden rounded-md px-1 py-0.5 text-[11px] leading-tight shadow-sm",
                             needs
-                              ? "border-dashed border-amber-500 bg-amber-500/15 text-amber-950 dark:text-amber-100 hyper-focus:text-amber-100"
-                              : "border-violet-500 bg-violet-500/15 text-violet-950 dark:text-violet-100 hyper-focus:text-violet-100",
-                            reserved && "border-dashed opacity-80",
+                              ? "study-border-needs text-amber-950 dark:text-amber-100 hyper-focus:text-amber-100"
+                              : "study-border text-violet-950 dark:text-violet-100 hyper-focus:text-violet-100",
+                            reserved && "opacity-80",
                             dragging &&
-                              "z-40 cursor-grabbing opacity-90 shadow-lg ring-2 ring-foreground/30"
+                              "z-40 cursor-grabbing shadow-lg ring-2 ring-foreground/30"
                           )}
                           style={{ top, height: h, left: "2px", width: "calc(100% - 6px)" }}
-                          title={b.reason ?? b.title}
+                          title={b.reason ?? studyLabel(b)}
                         >
                           <div className="flex items-center gap-1 font-medium">
                             <GraduationCap className="size-3 shrink-0" />
                             <span className="line-clamp-2 break-words">
-                              {needs ? `${b.title} — set type` : b.title}
+                              {studyLabel(b)}
                             </span>
                           </div>
                           {h > 34 && (
@@ -1711,6 +1738,15 @@ function MiniChip({
   );
 }
 
+// Plain-language label for a system-placed study block: "Study for <exam>" for
+// exam prep, "Do <assignment> assignment" for assignment work, and a set-type
+// prompt for needs-input placeholders.
+function studyLabel(b: StudyBlockItem): string {
+  if (b.state === "needs_input") return `${b.title} — set type`;
+  if (b.source_kind === "exam") return `Study for ${b.title}`;
+  return `Do ${b.title} assignment`;
+}
+
 // A month-view chip for a scheduler study block: distinct violet (or amber
 // dashed for needs-input), with the study icon. needs-input chips are clickable
 // to answer the one question; the rest are read-only in month view.
@@ -1732,10 +1768,10 @@ function StudyChip({
           : "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-300 hyper-focus:text-violet-200",
         block.state === "reserved" && "border-dashed opacity-80"
       )}
-      title={block.reason ?? block.title}
+      title={block.reason ?? studyLabel(block)}
     >
       <GraduationCap className="size-3 shrink-0" />
-      <span className="truncate">{block.title}</span>
+      <span className="truncate">{studyLabel(block)}</span>
     </span>
   );
 }

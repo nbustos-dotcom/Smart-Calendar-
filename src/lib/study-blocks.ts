@@ -26,6 +26,7 @@ import {
 } from "@/lib/recurrence";
 import { getGoogleCalendarEvents } from "@/lib/google-calendar";
 import { addDays, startOfDay } from "@/lib/calendar";
+import { fingerprintInputs } from "@/lib/plan-fingerprint";
 import type { StudyBlockItem } from "@/lib/types";
 
 type StudyBlockRow = {
@@ -40,6 +41,88 @@ type StudyBlockRow = {
   reason: string | null;
   moved_by_user: boolean;
 };
+
+// Cheap fingerprint of the scheduler's inputs for the current user: assignments,
+// entered exams, saved answers, and MOVED study blocks. (Not ordinary busy time
+// — per spec, a new personal event alone doesn't force a reflow.)
+async function currentInputsHash(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<string> {
+  const [
+    { data: assignmentRows },
+    { data: examRows },
+    { data: overrideRows },
+    { data: movedRows },
+  ] = await Promise.all([
+    supabase
+      .from("assignments")
+      .select(
+        "canvas_assignment_id, due_at, submitted, graded, title, submission_types, assignment_group_name"
+      ),
+    supabase.from("exams").select("id, exam_at, est_prep_minutes, title"),
+    supabase
+      .from("assignment_overrides")
+      .select("canvas_assignment_id, task_category, est_minutes, skip"),
+    supabase.from("study_blocks").select("id, starts_at, ends_at").eq("moved_by_user", true),
+  ]);
+
+  return fingerprintInputs({
+    assignments: ((assignmentRows ?? []) as Record<string, unknown>[]).map((a) => ({
+      canvasAssignmentId: Number(a.canvas_assignment_id),
+      dueAt: (a.due_at as string | null) ?? null,
+      submitted: Boolean(a.submitted),
+      graded: Boolean(a.graded),
+      title: String(a.title ?? ""),
+      submissionTypes: (a.submission_types as string[] | null) ?? [],
+      assignmentGroupName: (a.assignment_group_name as string | null) ?? null,
+    })),
+    exams: ((examRows ?? []) as Record<string, unknown>[]).map((e) => ({
+      id: String(e.id),
+      examAt: String(e.exam_at),
+      estPrepMinutes: (e.est_prep_minutes as number | null) ?? null,
+      title: String(e.title ?? ""),
+    })),
+    overrides: ((overrideRows ?? []) as Record<string, unknown>[]).map((o) => ({
+      canvasAssignmentId: Number(o.canvas_assignment_id),
+      taskCategory: (o.task_category as string | null) ?? null,
+      estMinutes: (o.est_minutes as number | null) ?? null,
+      skip: Boolean(o.skip),
+    })),
+    movedBlocks: ((movedRows ?? []) as Record<string, unknown>[]).map((m) => ({
+      id: String(m.id),
+      startsAt: String(m.starts_at),
+      endsAt: String(m.ends_at),
+    })),
+  });
+}
+
+// Run the planner AUTOMATICALLY, but only if the inputs changed since last time.
+// Called on dashboard load. Cheap on the common path (two small reads + a hash
+// compare); only does real work when something relevant actually changed. Safe
+// to call on every render — the guard makes a repeat call a no-op.
+export async function ensureSchedulePlanned(): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const hash = await currentInputsHash(supabase);
+  const { data: state } = await supabase
+    .from("study_plan_state")
+    .select("inputs_hash")
+    .maybeSingle();
+
+  if (state?.inputs_hash === hash) return; // nothing relevant changed → skip
+
+  const res = await runPlanner();
+  if (!res.ok) return; // leave the fingerprint unchanged so we retry next load
+
+  await supabase.from("study_plan_state").upsert(
+    { user_id: user.id, inputs_hash: hash, planned_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    { onConflict: "user_id" }
+  );
+}
 
 export async function listStudyBlocks(): Promise<StudyBlockItem[]> {
   const supabase = await createClient();

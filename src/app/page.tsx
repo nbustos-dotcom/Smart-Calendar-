@@ -14,7 +14,7 @@ import { TodoPanel } from "@/components/todo-panel";
 import { listTodoItems, listDoneAssignmentIds } from "@/lib/todo";
 import { getGoogleCalendarEvents } from "@/lib/google-calendar";
 import { listExams } from "@/lib/exams";
-import { listStudyBlocks } from "@/lib/study-blocks";
+import { listStudyBlocks, ensureSchedulePlanned } from "@/lib/study-blocks";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { AssignmentItem, ClassEventItem } from "@/lib/types";
@@ -47,6 +47,13 @@ type ClassEventRow = {
 
 export default async function HomePage() {
   const supabase = await createClient();
+
+  // Run the study planner automatically, but only when its inputs changed since
+  // last time (cheap fingerprint compare). This is the ONLY trigger besides the
+  // after-sync run — the student never manually plans. On the common unchanged
+  // path this is a couple of small reads and a hash compare, and it leaves
+  // existing (and moved) study blocks untouched.
+  await ensureSchedulePlanned();
 
   // These reads are all independent, so fire them concurrently instead of
   // awaiting one after another. That turns what was a 7-round-trip waterfall on

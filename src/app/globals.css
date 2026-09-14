@@ -568,3 +568,51 @@ body,
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+
+/* ==========================================================================
+   STUDY BLOCKS — animated "the system placed this" gradient border
+
+   A subtle, SLOW, slowly colour-shifting gradient border marks scheduler-placed
+   study blocks apart from the student's own events / Canvas / Google. Uses the
+   two-background gradient-border recipe: a translucent fill on the padding box +
+   an oversized gradient on the border box whose position drifts. The element's
+   own border-radius (Tailwind `rounded-md`) rounds it. Kept gentle (9s, alternate)
+   so many at once aren't distracting, and OFF for reduced-motion users.
+   ========================================================================== */
+
+@keyframes study-border-shift {
+  from { background-position: center, 0% 50%; }
+  to   { background-position: center, 100% 50%; }
+}
+
+.study-border,
+.study-border-needs {
+  border: 2px solid transparent;
+  background-size: 100% 100%, 300% 100%;
+  background-position: center, 0% 50%;
+  animation: study-border-shift 9s ease-in-out infinite alternate;
+}
+
+.study-border {
+  background-image:
+    linear-gradient(oklch(0.55 0.2 290 / 0.16), oklch(0.55 0.2 290 / 0.16)),
+    linear-gradient(90deg, #8b5cf6, #6366f1, #22d3ee, #6366f1, #8b5cf6);
+  background-clip: padding-box, border-box;
+  background-origin: padding-box, border-box;
+}
+
+.study-border-needs {
+  background-image:
+    linear-gradient(oklch(0.78 0.15 80 / 0.18), oklch(0.78 0.15 80 / 0.18)),
+    linear-gradient(90deg, #f59e0b, #8b5cf6, #22d3ee, #f59e0b);
+  background-clip: padding-box, border-box;
+  background-origin: padding-box, border-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .study-border,
+  .study-border-needs {
+    animation: none;
+  }
+}
