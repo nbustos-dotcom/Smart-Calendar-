@@ -35,6 +35,28 @@ export const SCHEDULER_CONFIG = {
   // than days-until-test), to be revisited, not a literal model of the science.
   SPACING_FRACTION: 0.2,
 
+  // "Don't start too early" — assignment START-OFFSET ladder. WHY: without this,
+  // the engine placed every future assignment's work into the next free days,
+  // flooding today/tomorrow with weeks of work. Each assignment is only placed
+  // inside a lead window [due − leadDays, due]; bigger tasks earn a longer lead.
+  // Matched top-down against the task's total (already-buffered) minutes; first
+  // tier whose maxMinutes covers the total wins. Tunable knob.
+  LEAD_DAYS: [
+    { maxMinutes: 60, leadDays: 2 }, // tiny (≤1h): ~2 days before it's due
+    { maxMinutes: 120, leadDays: 4 }, // small (≤2h): a few days
+    { maxMinutes: 240, leadDays: 7 }, // medium (≤4h): ~1 week
+    { maxMinutes: 480, leadDays: 14 }, // large (≤8h): ~2 weeks
+    { maxMinutes: Number.POSITIVE_INFINITY, leadDays: 21 }, // huge: ~3 weeks
+  ] as { maxMinutes: number; leadDays: number }[],
+
+  // Honesty backstop: the most study/work minutes we'll schedule on any ONE day
+  // (summed across all tasks + entered exam prep). WHY: even inside a lead window
+  // we must never cram a whole workload into a single day and present it as a
+  // real plan. Work that can't fit under this cap before its deadline becomes a
+  // `reserved` block (honest "not enough capacity"), never silently dropped and
+  // never overflowing the day. Tunable knob (a few hours/day).
+  MAX_STUDY_MINUTES_PER_DAY: 180, // 3 hours/day
+
   // Fixed per-category default TOTAL work minutes. Used as-is (already padded).
   // The duration ladder falls back to these when the student gave no estimate.
   CATEGORY_DEFAULT_MINUTES: {

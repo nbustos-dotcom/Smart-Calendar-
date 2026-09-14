@@ -37,6 +37,19 @@ export type PlannableTask = {
   needsInput: boolean; // true → we must ask the student one question
 };
 
+// A study block the student manually moved on a previous run. We keep these
+// fixed (their time is already in `busy`), and — crucially — they COUNT as one
+// of their task's sessions so a re-plan doesn't re-create work the student has
+// already placed. Matched to a task by (sourceKind, taskId); sessionIndex tells
+// us which session slot it fills so the remaining sessions get the right labels.
+export type LockedSession = {
+  sourceKind: "assignment" | "exam";
+  taskId: string;
+  sessionIndex: number | null;
+  start: Date;
+  end: Date;
+};
+
 export type BlockState = "scheduled" | "reserved" | "needs_input";
 
 export type PlannedBlock = {
@@ -73,6 +86,17 @@ export function resolveDurationMinutes(
     return cfg.CATEGORY_DEFAULT_MINUTES[category];
   }
   return null;
+}
+
+// --- Start-offset ("don't start too early") ----------------------------------
+// How many days before the due date an assignment's work may begin, from the
+// LEAD_DAYS ladder: bigger tasks earn a longer lead. Pure so it's unit-testable.
+export function leadDaysFor(totalMinutes: number, cfg: Config = SCHEDULER_CONFIG): number {
+  for (const tier of cfg.LEAD_DAYS) {
+    if (totalMinutes <= tier.maxMinutes) return tier.leadDays;
+  }
+  // Defensive: LEAD_DAYS always ends in an Infinity tier, so this is unreachable.
+  return cfg.LEAD_DAYS[cfg.LEAD_DAYS.length - 1]?.leadDays ?? cfg.HORIZON_DAYS;
 }
 
 // --- Free-time construction --------------------------------------------------
@@ -180,16 +204,50 @@ function dayBounds(now: Date, deadline: Date, offset: number): { after: Date; be
   return { after, before };
 }
 
+// Key a day for the shared daily-load map (the workload cap): the local
+// midnight timestamp of whatever day a slot falls on.
+function dayKeyOf(d: Date): number {
+  return startOfDay(d).getTime();
+}
+
+// Minutes a slot occupies.
+function slotMinutes(slot: BusyInterval): number {
+  return (slot.end.getTime() - slot.start.getTime()) / MS_PER_MIN;
+}
+
 // --- The main entry point ----------------------------------------------------
 
 export function planSchedule(input: {
   now: Date;
   tasks: PlannableTask[];
   busy: BusyInterval[];
+  // Study blocks the student has already moved by hand. Their time is expected
+  // to be part of `busy`; here they also reduce how many NEW sessions each task
+  // needs, so a moved block counts as one session instead of duplicating it.
+  locked?: LockedSession[];
   config?: Config;
 }): PlannedBlock[] {
   const cfg = input.config ?? SCHEDULER_CONFIG;
   const { now } = input;
+
+  // Group the moved (locked) sessions by their task so each task can subtract
+  // the sessions it already has placed.
+  const lockedByTask = new Map<string, LockedSession[]>();
+  for (const l of input.locked ?? []) {
+    const key = `${l.sourceKind}:${l.taskId}`;
+    const list = lockedByTask.get(key);
+    if (list) list.push(l);
+    else lockedByTask.set(key, [l]);
+  }
+
+  // Shared per-day workload tally (minutes), so the daily cap holds ACROSS tasks
+  // and already-placed exam prep — not just within one task. Seed it with the
+  // moved blocks the student has locked in, so they count toward each day's cap.
+  const dayLoad = new Map<number, number>();
+  for (const l of input.locked ?? []) {
+    const key = dayKeyOf(l.start);
+    dayLoad.set(key, (dayLoad.get(key) ?? 0) + slotMinutes(l));
+  }
 
   // Horizon: HORIZON_DAYS out, stretched to the furthest deadline, capped.
   const cap = addDays(startOfDay(now), cfg.HORIZON_CAP_DAYS);
@@ -215,8 +273,13 @@ export function planSchedule(input: {
   for (const task of tasks) {
     if (task.deadline <= now) continue; // nothing to do for a past deadline
 
+    const lockedForTask = lockedByTask.get(`${task.kind}:${task.id}`) ?? [];
+
     if (task.needsInput || task.totalMinutes == null) {
-      // Hold one small, clickable placeholder and ask the student what it is.
+      // If the student already moved a block for this task, keep that (it's in
+      // `busy`/`locked`) and don't re-create the placeholder. Otherwise hold one
+      // small, clickable placeholder and ask what kind of task it is.
+      if (lockedForTask.length > 0) continue;
       const slot =
         takeEarliestSlot(free, now, task.deadline, cfg.PLACEHOLDER_MINUTES) ??
         takeEarliestSlot(free, now, horizonEnd, cfg.PLACEHOLDER_MINUTES);
@@ -236,13 +299,43 @@ export function planSchedule(input: {
       continue;
     }
 
+    // Full session plan for the task. `count` is the label denominator ("of N")
+    // and stays fixed even when some sessions are already locked in by a move.
     const sessions = splitSessions(task.totalMinutes, cfg);
+    const count = sessions.length;
+
+    // Reconcile moved blocks: a locked session fills one of the N slots, so we
+    // only place the REMAINING slots. Match by session index where we have it,
+    // then fall back to the earliest still-open indices. This is what stops a
+    // move from turning an N-session task into N+1 blocks on the next re-plan.
+    const takenIndices = new Set(
+      lockedForTask
+        .map((l) => l.sessionIndex)
+        .filter((n): n is number => n != null && n >= 1 && n <= count)
+    );
+    let openSlots = sessions
+      .map((minutes, i) => ({ index: i + 1, minutes }))
+      .filter((s) => !takenIndices.has(s.index));
+    // Locked blocks without a usable index still consume a slot each: drop that
+    // many from the front so the remaining count is exactly count − lockedCount.
+    const untracked = lockedForTask.length - takenIndices.size;
+    if (untracked > 0) openSlots = openSlots.slice(untracked);
+
+    const toPlaceMinutes = openSlots.map((s) => s.minutes);
+    // `placeAssignment` enforces (and updates) the shared daily cap itself. The
+    // exam path is left untouched, so we record ITS placed minutes here so later
+    // assignments still see exam-prep days filling up.
     const placed: BusyInterval[] =
       task.kind === "exam"
-        ? placeExam(free, now, task, sessions, cfg)
-        : placeAssignment(free, now, task, sessions);
+        ? placeExam(free, now, task, toPlaceMinutes, cfg)
+        : placeAssignment(free, now, task, toPlaceMinutes, dayLoad, cfg);
+    if (task.kind === "exam") {
+      for (const slot of placed) {
+        const key = dayKeyOf(slot.start);
+        dayLoad.set(key, (dayLoad.get(key) ?? 0) + slotMinutes(slot));
+      }
+    }
 
-    const count = sessions.length;
     placed.forEach((slot, i) => {
       out.push({
         sourceKind: task.kind,
@@ -251,16 +344,20 @@ export function planSchedule(input: {
         start: slot.start,
         end: slot.end,
         state: "scheduled",
-        reason: reasonFor(task, i + 1, count, slot.start),
-        sessionIndex: i + 1,
+        reason: reasonFor(task, openSlots[i].index, count, slot.start),
+        sessionIndex: openSlots[i].index,
         sessionCount: count,
       });
     });
 
-    // Honest shortfall: if not everything fit before the deadline, hold ONE
-    // reserved placeholder so the gap is visible rather than silently dropped.
-    if (placed.length < sessions.length) {
-      const missing = sessions.slice(placed.length).reduce((a, b) => a + b, 0);
+    // Honest shortfall: if not everything fit (no free time, or the daily cap
+    // was reached) before the deadline, hold ONE reserved placeholder so the gap
+    // is visible rather than silently dropped or crammed past the cap.
+    if (placed.length < openSlots.length) {
+      const missing = openSlots
+        .slice(placed.length)
+        .reduce((a, b) => a + b.minutes, 0);
+      const firstUnplacedIndex = openSlots[placed.length].index;
       const slot =
         takeEarliestSlot(free, now, task.deadline, cfg.MIN_CHUNK_MINUTES) ??
         takeEarliestSlot(free, now, horizonEnd, cfg.MIN_CHUNK_MINUTES);
@@ -273,8 +370,8 @@ export function planSchedule(input: {
           end: slot.end,
           state: "reserved",
           reason: `Not enough free time before the deadline for ~${missing} more min — held as a reminder.`,
-          sessionIndex: placed.length + 1,
-          sessionCount: sessions.length,
+          sessionIndex: firstUnplacedIndex,
+          sessionCount: count,
         });
       }
     }
@@ -283,26 +380,48 @@ export function planSchedule(input: {
   return out.sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
-// Assignments: spread sessions across [now, due], EARLIEST-first, at most one per
-// day per pass, adding extra passes only if there are more sessions than days.
+// Assignments: place sessions ONLY inside the lead window [due − leadDays, due]
+// (so far-future work doesn't flood the present), spread EARLIEST-first across
+// that window, one per day per pass. A day is skipped once it would exceed the
+// shared daily cap; sessions that never fit come back as a shortfall (→ the
+// caller reserves them) rather than being crammed past the cap.
 function placeAssignment(
   free: BusyInterval[],
   now: Date,
   task: PlannableTask,
-  sessions: number[]
+  sessions: number[],
+  dayLoad: Map<number, number>,
+  cfg: Config
 ): BusyInterval[] {
   const placed: BusyInterval[] = [];
+  if (sessions.length === 0) return placed;
+
   const lastDay = daysUntil(now, task.deadline);
-  let queue = [...sessions];
+  const total = sessions.reduce((a, b) => a + b, 0);
+  const lead = leadDaysFor(total, cfg);
+  // Earliest offset we're allowed to start: leadDays before the due day, clamped
+  // to today. This is the START-OFFSET that keeps the calendar honest.
+  const firstDay = Math.max(0, lastDay - lead);
+
+  const queue = [...sessions];
   let progress = true;
   while (queue.length > 0 && progress) {
     progress = false;
-    for (let offset = 0; offset <= lastDay && queue.length > 0; offset++) {
+    for (let offset = firstDay; offset <= lastDay && queue.length > 0; offset++) {
       const { after, before } = dayBounds(now, task.deadline, offset);
       if (after >= before) continue;
+
+      // Daily cap: don't schedule this session if it would push the day's total
+      // study minutes over the cap. The day just gets skipped; the session waits
+      // for another day in the window (or becomes a reserved shortfall).
+      const dayKey = dayKeyOf(addDays(startOfDay(now), offset));
+      const used = dayLoad.get(dayKey) ?? 0;
+      if (used + queue[0] > cfg.MAX_STUDY_MINUTES_PER_DAY) continue;
+
       const slot = takeEarliestSlot(free, after, before, queue[0]);
       if (slot) {
         placed.push(slot);
+        dayLoad.set(dayKey, used + queue[0]);
         queue.shift();
         progress = true;
       }

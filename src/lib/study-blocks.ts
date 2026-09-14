@@ -15,6 +15,7 @@ import {
   planSchedule,
   resolveDurationMinutes,
   type BusyInterval,
+  type LockedSession,
   type PlannableTask,
 } from "@/lib/scheduler";
 import { SCHEDULER_CONFIG } from "@/lib/scheduler-config";
@@ -197,7 +198,9 @@ export async function runPlanner(): Promise<{
       ),
     supabase
       .from("study_blocks")
-      .select("starts_at, ends_at")
+      .select(
+        "source_kind, canvas_assignment_id, exam_id, starts_at, ends_at, session_index"
+      )
       .eq("moved_by_user", true),
     getGoogleCalendarEvents(),
   ]);
@@ -282,8 +285,38 @@ export async function runPlanner(): Promise<{
     pushInterval(c.start_at, c.end_at);
   }
   for (const g of googleEvents) pushInterval(g.start_at, g.end_at);
-  for (const m of (movedBlockRows ?? []) as { starts_at: string; ends_at: string }[]) {
+
+  // Moved study blocks are both (a) fixed busy time we schedule around, and
+  // (b) a session the student has already placed for their task, so it must
+  // COUNT as one of that task's sessions on regen (otherwise a 3-session task
+  // with 1 moved block would regenerate 3 more → 4 total). We build both here.
+  const locked: LockedSession[] = [];
+  for (const m of (movedBlockRows ?? []) as {
+    source_kind: "assignment" | "exam";
+    canvas_assignment_id: number | null;
+    exam_id: string | null;
+    starts_at: string;
+    ends_at: string;
+    session_index: number | null;
+  }[]) {
     pushInterval(m.starts_at, m.ends_at);
+    const taskId =
+      m.source_kind === "assignment"
+        ? m.canvas_assignment_id != null
+          ? String(m.canvas_assignment_id)
+          : null
+        : m.exam_id;
+    if (!taskId) continue; // can't tie it to a task → keep only as busy time
+    const start = new Date(m.starts_at);
+    const end = new Date(m.ends_at);
+    if (end <= start) continue;
+    locked.push({
+      sourceKind: m.source_kind,
+      taskId,
+      sessionIndex: m.session_index ?? null,
+      start,
+      end,
+    });
   }
   // The user's own events, expanded into concrete occurrences over the horizon
   // (honoring per-occurrence moves/cancellations).
@@ -296,7 +329,7 @@ export async function runPlanner(): Promise<{
   for (const o of occurrences) busy.push({ start: o.start, end: o.end });
 
   // --- Plan ------------------------------------------------------------------
-  const planned = planSchedule({ now, tasks, busy });
+  const planned = planSchedule({ now, tasks, busy, locked });
 
   // --- Persist: replace auto blocks, keep the ones the student moved --------
   await supabase

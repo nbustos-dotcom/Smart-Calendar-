@@ -107,6 +107,113 @@ describe("planSchedule — assignments", () => {
   });
 });
 
+describe("planSchedule — deadline-aware placement (anti-flood)", () => {
+  const now = at(2026, 0, 5, 8, 0); // Mon Jan 5, 08:00
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+  it("does NOT place a far-future small assignment in the near term", () => {
+    // 60-min task (lead ≈ 2 days) due 25 days out → work belongs at the END.
+    const task: PlannableTask = {
+      kind: "assignment",
+      id: "1",
+      title: "Quiz",
+      deadline: at(2026, 0, 30, 23, 59),
+      totalMinutes: 60,
+      needsInput: false,
+    };
+    const blocks = planSchedule({ now, tasks: [task], busy: [] });
+    expect(blocks.length).toBeGreaterThan(0);
+    // Nothing lands anywhere near "now" — every block sits inside the lead window
+    // just before the due date (here, on/after Jan 28), not on Jan 5/6.
+    const windowStart = at(2026, 0, 28, 0, 0);
+    for (const b of blocks) {
+      expect(b.start.getTime()).toBeGreaterThanOrEqual(windowStart.getTime());
+      expect(b.end.getTime()).toBeLessThanOrEqual(task.deadline.getTime());
+    }
+  });
+
+  it("surfaces a large far-future assignment only within its lead window", () => {
+    // 480-min task (lead ≈ 2 weeks) due 25 days out → nothing before Jan 16.
+    const task: PlannableTask = {
+      kind: "assignment",
+      id: "1",
+      title: "Project",
+      deadline: at(2026, 0, 30, 23, 59),
+      totalMinutes: 480,
+      needsInput: false,
+    };
+    const blocks = planSchedule({ now, tasks: [task], busy: [] });
+    expect(blocks.filter((b) => b.state === "scheduled").length).toBe(6); // 6×80
+    const windowStart = at(2026, 0, 16, 0, 0); // due − 14 days
+    for (const b of blocks) {
+      expect(b.start.getTime()).toBeGreaterThanOrEqual(windowStart.getTime());
+    }
+  });
+
+  it("routes overload to `reserved` instead of cramming past the daily cap", () => {
+    // 540 min (six 90-min sessions) due tomorrow → only two days in range and a
+    // 180-min/day cap ⇒ 4 fit (2/day), the rest is held reserved, never crammed.
+    const task: PlannableTask = {
+      kind: "assignment",
+      id: "1",
+      title: "Cram",
+      deadline: at(2026, 0, 6, 22, 0),
+      totalMinutes: 540,
+      needsInput: false,
+    };
+    const blocks = planSchedule({ now, tasks: [task], busy: [] });
+    const scheduled = blocks.filter((b) => b.state === "scheduled");
+    expect(scheduled).toHaveLength(4);
+    expect(blocks.some((b) => b.state === "reserved")).toBe(true);
+
+    // No single day exceeds the cap.
+    const perDay = new Map<number, number>();
+    for (const b of scheduled) {
+      const key = startOfDay(b.start).getTime();
+      const mins = (b.end.getTime() - b.start.getTime()) / 60000;
+      perDay.set(key, (perDay.get(key) ?? 0) + mins);
+    }
+    for (const total of perDay.values()) {
+      expect(total).toBeLessThanOrEqual(SCHEDULER_CONFIG.MAX_STUDY_MINUTES_PER_DAY);
+    }
+  });
+});
+
+describe("planSchedule — moved-block reconciliation (no N+1 duplication)", () => {
+  const now = at(2026, 0, 5, 8, 0);
+
+  it("counts a moved block as one of its task's sessions (3 → 3, not 4)", () => {
+    // A 3-session task where the student already moved session 2 by hand.
+    const task: PlannableTask = {
+      kind: "assignment",
+      id: "1",
+      title: "PSet",
+      deadline: at(2026, 0, 12, 23, 59),
+      totalMinutes: 270, // three 90-min sessions
+      needsInput: false,
+    };
+    const movedStart = at(2026, 0, 8, 10, 0);
+    const movedEnd = at(2026, 0, 8, 11, 30);
+    const locked = [
+      { sourceKind: "assignment" as const, taskId: "1", sessionIndex: 2, start: movedStart, end: movedEnd },
+    ];
+    const busy: BusyInterval[] = [{ start: movedStart, end: movedEnd }];
+
+    const blocks = planSchedule({ now, tasks: [task], busy, locked });
+    const scheduled = blocks.filter((b) => b.state === "scheduled");
+
+    // Only the TWO remaining sessions are regenerated (not three).
+    expect(scheduled).toHaveLength(2);
+    for (const b of scheduled) expect(b.sessionCount).toBe(3);
+    // They fill the open slots (1 and 3); the moved block keeps slot 2.
+    expect(new Set(scheduled.map((b) => b.sessionIndex))).toEqual(new Set([1, 3]));
+    // Regenerated (2) + kept moved block (1) = 3 total — never 4.
+    expect(scheduled.length + locked.length).toBe(3);
+    // None of the regenerated work collides with the moved block.
+    for (const b of scheduled) expect(overlaps(b, busy[0])).toBe(false);
+  });
+});
+
 describe("planSchedule — exams (spacing effect)", () => {
   it("spaces a 2-day test into ~one session per day, all before the exam", () => {
     const now = at(2026, 0, 5, 8, 0);
