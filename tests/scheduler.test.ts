@@ -150,9 +150,9 @@ describe("planSchedule — deadline-aware placement (anti-flood)", () => {
     }
   });
 
-  it("routes overload to `reserved` instead of cramming past the daily cap", () => {
+  it("caps real placement at MAX_STUDY_MINUTES_PER_DAY (never crams)", () => {
     // 540 min (six 90-min sessions) due tomorrow → only two days in range and a
-    // 180-min/day cap ⇒ 4 fit (2/day), the rest is held reserved, never crammed.
+    // 180-min/day cap ⇒ exactly 4 fit (2/day); the rest is NOT crammed in.
     const task: PlannableTask = {
       kind: "assignment",
       id: "1",
@@ -162,16 +162,94 @@ describe("planSchedule — deadline-aware placement (anti-flood)", () => {
       needsInput: false,
     };
     const blocks = planSchedule({ now, tasks: [task], busy: [] });
-    const scheduled = blocks.filter((b) => b.state === "scheduled");
-    expect(scheduled).toHaveLength(4);
-    expect(blocks.some((b) => b.state === "reserved")).toBe(true);
-
-    // No single day exceeds the cap.
+    expect(blocks.filter((b) => b.state === "scheduled")).toHaveLength(4);
     const perDay = new Map<number, number>();
-    for (const b of scheduled) {
+    for (const b of blocks) {
       const key = startOfDay(b.start).getTime();
-      const mins = (b.end.getTime() - b.start.getTime()) / 60000;
-      perDay.set(key, (perDay.get(key) ?? 0) + mins);
+      perDay.set(key, (perDay.get(key) ?? 0) + (b.end.getTime() - b.start.getTime()) / 60000);
+    }
+    for (const total of perDay.values()) {
+      expect(total).toBeLessThanOrEqual(SCHEDULER_CONFIG.MAX_STUDY_MINUTES_PER_DAY);
+    }
+  });
+
+  it("defers an overflow reserved block rather than dumping it on a full day", () => {
+    // Same saturating load: both in-range days hit the cap with real sessions, so
+    // the leftover work has nowhere to go under the cap. Per policy it is DEFERRED
+    // — nothing is dumped onto an already-full (or earlier) day.
+    const task: PlannableTask = {
+      kind: "assignment",
+      id: "1",
+      title: "Cram",
+      deadline: at(2026, 0, 6, 22, 0),
+      totalMinutes: 540,
+      needsInput: false,
+    };
+    const blocks = planSchedule({ now, tasks: [task], busy: [] });
+    expect(blocks.some((b) => b.state === "reserved")).toBe(false);
+    // Every day still within the cap across ALL block states.
+    const perDay = new Map<number, number>();
+    for (const b of blocks) {
+      const key = startOfDay(b.start).getTime();
+      perDay.set(key, (perDay.get(key) ?? 0) + (b.end.getTime() - b.start.getTime()) / 60000);
+    }
+    for (const total of perDay.values()) {
+      expect(total).toBeLessThanOrEqual(SCHEDULER_CONFIG.MAX_STUDY_MINUTES_PER_DAY);
+    }
+  });
+
+  it("(a) keeps far-future work — scheduled, reserved AND needs_input — out of the current week", () => {
+    // Two tasks due ~11 weeks out (Mar 23): one sized (2-week lead), one unknown
+    // type. Neither's lead window has opened, so NOTHING appears this week.
+    const due = at(2026, 2, 23, 23, 59);
+    const tasks: PlannableTask[] = [
+      { kind: "assignment", id: "1", title: "Final Project", deadline: due, totalMinutes: 480, needsInput: false },
+      { kind: "assignment", id: "2", title: "Week 14 ???", deadline: due, totalMinutes: null, needsInput: true },
+    ];
+    const blocks = planSchedule({ now, tasks, busy: [] });
+    const endOfWeek = at(2026, 0, 12, 0, 0); // start Jan 5 → the week ends Jan 12
+    const thisWeek = blocks.filter((b) => b.start.getTime() < endOfWeek.getTime());
+    expect(thisWeek).toHaveLength(0);
+    // Belt and suspenders: no near-term block of ANY state slipped through.
+    for (const b of blocks) {
+      expect(b.start.getTime()).toBeGreaterThanOrEqual(endOfWeek.getTime());
+    }
+  });
+
+  it("(b) places a needs_input placeholder inside its lead window, never at `now`", () => {
+    // Unknown-type task due Jan 20 (15 days out). The placeholder must appear near
+    // the deadline (inside the lead window), not dumped on today.
+    const due = at(2026, 0, 20, 23, 59);
+    const task: PlannableTask = {
+      kind: "assignment", id: "1", title: "???", deadline: due, totalMinutes: null, needsInput: true,
+    };
+    const blocks = planSchedule({ now, tasks: [task], busy: [] });
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].state).toBe("needs_input");
+    const windowStart = at(2026, 0, 18, 0, 0); // due − 2 days (placeholder lead)
+    expect(blocks[0].start.getTime()).toBeGreaterThanOrEqual(windowStart.getTime());
+    expect(blocks[0].start.getTime()).toBeLessThanOrEqual(due.getTime());
+    // Emphatically not at/near now.
+    expect(blocks[0].start.getTime()).toBeGreaterThan(at(2026, 0, 15, 0, 0).getTime());
+  });
+
+  it("(c) placeholders respect the daily cap and don't stack past it", () => {
+    // Two 180-min tasks saturate today + tomorrow to the cap; a third, unknown-type
+    // task shares that window. Its placeholder must NOT push either day over the cap.
+    const deadline = at(2026, 0, 6, 22, 0);
+    const tasks: PlannableTask[] = [
+      { kind: "assignment", id: "A", title: "A", deadline, totalMinutes: 180, needsInput: false },
+      { kind: "assignment", id: "B", title: "B", deadline, totalMinutes: 180, needsInput: false },
+      { kind: "assignment", id: "C", title: "C ???", deadline, totalMinutes: null, needsInput: true },
+    ];
+    const blocks = planSchedule({ now, tasks, busy: [] });
+    expect(blocks.filter((b) => b.state === "scheduled")).toHaveLength(4); // 2 tasks × 2
+    // The needs_input placeholder found no room under the cap → deferred, not stacked.
+    expect(blocks.some((b) => b.state === "needs_input")).toBe(false);
+    const perDay = new Map<number, number>();
+    for (const b of blocks) {
+      const key = startOfDay(b.start).getTime();
+      perDay.set(key, (perDay.get(key) ?? 0) + (b.end.getTime() - b.start.getTime()) / 60000);
     }
     for (const total of perDay.values()) {
       expect(total).toBeLessThanOrEqual(SCHEDULER_CONFIG.MAX_STUDY_MINUTES_PER_DAY);

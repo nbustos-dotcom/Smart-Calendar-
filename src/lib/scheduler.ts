@@ -215,6 +215,42 @@ function slotMinutes(slot: BusyInterval): number {
   return (slot.end.getTime() - slot.start.getTime()) / MS_PER_MIN;
 }
 
+// Place ONE placeholder block (a reserved shortfall or a needs-input marker)
+// under the SAME rules as real work: only inside the lead window
+// [due − leadDays, due], earliest-first within that window, and never onto a day
+// already at the daily cap. Books the block against `dayLoad` and returns it, or
+// returns null when it can't fit — in which case the caller emits NOTHING,
+// deferring the block to a future run (once the window opens / capacity frees)
+// rather than dumping it on the earliest day. `leadBasisMinutes` sizes the lead
+// window (the task's real total for reserved; the placeholder size for a
+// needs-input task, whose real size is unknown).
+function placeWithinLeadWindow(
+  free: BusyInterval[],
+  now: Date,
+  deadline: Date,
+  leadBasisMinutes: number,
+  blockMinutes: number,
+  dayLoad: Map<number, number>,
+  cfg: Config
+): BusyInterval | null {
+  const lastDay = daysUntil(now, deadline);
+  const lead = leadDaysFor(leadBasisMinutes, cfg);
+  const firstDay = Math.max(0, lastDay - lead);
+  for (let offset = firstDay; offset <= lastDay; offset++) {
+    const { after, before } = dayBounds(now, deadline, offset);
+    if (after >= before) continue;
+    const dayKey = dayKeyOf(addDays(startOfDay(now), offset));
+    const used = dayLoad.get(dayKey) ?? 0;
+    if (used + blockMinutes > cfg.MAX_STUDY_MINUTES_PER_DAY) continue; // day full
+    const slot = takeEarliestSlot(free, after, before, blockMinutes);
+    if (slot) {
+      dayLoad.set(dayKey, used + blockMinutes);
+      return slot;
+    }
+  }
+  return null;
+}
+
 // --- The main entry point ----------------------------------------------------
 
 export function planSchedule(input: {
@@ -278,11 +314,20 @@ export function planSchedule(input: {
     if (task.needsInput || task.totalMinutes == null) {
       // If the student already moved a block for this task, keep that (it's in
       // `busy`/`locked`) and don't re-create the placeholder. Otherwise hold one
-      // small, clickable placeholder and ask what kind of task it is.
+      // small, clickable placeholder and ask what kind of task it is — but only
+      // INSIDE the lead window and under the daily cap, exactly like real work,
+      // so a far-future unknown task stays invisible until its window opens. Its
+      // real size is unknown, so the placeholder size sizes the window.
       if (lockedForTask.length > 0) continue;
-      const slot =
-        takeEarliestSlot(free, now, task.deadline, cfg.PLACEHOLDER_MINUTES) ??
-        takeEarliestSlot(free, now, horizonEnd, cfg.PLACEHOLDER_MINUTES);
+      const slot = placeWithinLeadWindow(
+        free,
+        now,
+        task.deadline,
+        cfg.PLACEHOLDER_MINUTES,
+        cfg.PLACEHOLDER_MINUTES,
+        dayLoad,
+        cfg
+      );
       if (slot) {
         out.push({
           sourceKind: task.kind,
@@ -352,15 +397,24 @@ export function planSchedule(input: {
 
     // Honest shortfall: if not everything fit (no free time, or the daily cap
     // was reached) before the deadline, hold ONE reserved placeholder so the gap
-    // is visible rather than silently dropped or crammed past the cap.
+    // is visible rather than silently dropped or crammed past the cap. It obeys
+    // the SAME lead window (sized by the task's real total) and daily cap as real
+    // work; if even a reminder can't fit there, it's deferred to a future run
+    // rather than dumped on the earliest day.
     if (placed.length < openSlots.length) {
       const missing = openSlots
         .slice(placed.length)
         .reduce((a, b) => a + b.minutes, 0);
       const firstUnplacedIndex = openSlots[placed.length].index;
-      const slot =
-        takeEarliestSlot(free, now, task.deadline, cfg.MIN_CHUNK_MINUTES) ??
-        takeEarliestSlot(free, now, horizonEnd, cfg.MIN_CHUNK_MINUTES);
+      const slot = placeWithinLeadWindow(
+        free,
+        now,
+        task.deadline,
+        task.totalMinutes,
+        cfg.MIN_CHUNK_MINUTES,
+        dayLoad,
+        cfg
+      );
       if (slot) {
         out.push({
           sourceKind: task.kind,
