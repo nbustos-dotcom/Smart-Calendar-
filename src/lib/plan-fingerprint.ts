@@ -32,6 +32,7 @@ export type FingerprintInput = {
   overrides: {
     canvasAssignmentId: number;
     taskCategory: string | null;
+    archetype: string | null;
     estMinutes: number | null;
     skip: boolean;
   }[];
@@ -72,7 +73,13 @@ export function fingerprintInputs(input: FingerprintInput): string {
   const o = [...input.overrides]
     .sort((x, y) => x.canvasAssignmentId - y.canvasAssignmentId)
     .map((x) =>
-      [x.canvasAssignmentId, x.taskCategory ?? "", x.estMinutes ?? "", x.skip ? 1 : 0].join("|")
+      [
+        x.canvasAssignmentId,
+        x.taskCategory ?? "",
+        x.archetype ?? "",
+        x.estMinutes ?? "",
+        x.skip ? 1 : 0,
+      ].join("|")
     );
 
   const m = [...input.movedBlocks]

@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   planSchedule,
   resolveDurationMinutes,
+  resolveArchetypeDuration,
+  spacingScheduleFor,
   type BusyInterval,
   type PlannableTask,
 } from "@/lib/scheduler";
@@ -303,5 +305,103 @@ describe("planSchedule — exams (spacing effect)", () => {
     for (const b of blocks) expect(b.end.getTime()).toBeLessThanOrEqual(exam.deadline.getTime());
     const days = new Set(blocks.map((b) => b.start.getDate()));
     expect(days.size).toBeGreaterThanOrEqual(2); // spread, not massed in one block
+  });
+});
+
+describe("resolveArchetypeDuration (Stage 1 duration model)", () => {
+  it("gives a completion task one small fixed block", () => {
+    expect(
+      resolveArchetypeDuration({ estMinutes: null, archetype: "completion", subtype: "submission", points: 100 })
+    ).toBe(SCHEDULER_CONFIG.COMPLETION_DEFAULT_MINUTES);
+  });
+
+  it("sizes production by subtype, scaled gently by points", () => {
+    expect(
+      resolveArchetypeDuration({ estMinutes: null, archetype: "production", subtype: "essay", points: 30 })
+    ).toBe(180); // essay base, mid points ×1.0
+    expect(
+      resolveArchetypeDuration({ estMinutes: null, archetype: "production", subtype: "project", points: 30 })
+    ).toBe(480); // project base (8h)
+    // Low points shrink a production task; readings fold in and are small.
+    expect(
+      resolveArchetypeDuration({ estMinutes: null, archetype: "production", subtype: "reading", points: 5 })
+    ).toBe(36); // reading base 60 × 0.6 (low points), above the 30 floor
+  });
+
+  it("sizes memorization prep by subtype (exam prep is the biggest)", () => {
+    expect(
+      resolveArchetypeDuration({ estMinutes: null, archetype: "memorization", subtype: "exam", points: null })
+    ).toBe(360);
+    // Heavy (high-points) exams scale up beyond the base.
+    expect(
+      resolveArchetypeDuration({ estMinutes: null, archetype: "memorization", subtype: "exam", points: 100 })
+    ).toBeGreaterThan(360);
+    expect(
+      resolveArchetypeDuration({ estMinutes: null, archetype: "memorization", subtype: "quiz", points: null })
+    ).toBe(45);
+  });
+
+  it("applies the per-archetype buffer to a student estimate", () => {
+    // completion buffer 1.1, production 1.5.
+    expect(
+      resolveArchetypeDuration({ estMinutes: 100, archetype: "completion", subtype: null, points: null })
+    ).toBe(110);
+    expect(
+      resolveArchetypeDuration({ estMinutes: 100, archetype: "production", subtype: null, points: null })
+    ).toBe(150);
+  });
+});
+
+describe("spacingScheduleFor", () => {
+  it("uses tight spacing for a soon exam and wide spacing for a far one", () => {
+    expect(spacingScheduleFor(10)).toBe("2-3-5-7");
+    expect(spacingScheduleFor(30)).toBe("1-3-7-21");
+  });
+});
+
+describe("planSchedule — archetype routing (Stage 1)", () => {
+  const now = at(2026, 0, 5, 8, 0);
+
+  it("places a completion task as ONE small block near the deadline (not chunked)", () => {
+    const task: PlannableTask = {
+      kind: "assignment",
+      id: "1",
+      title: "Step Submission",
+      deadline: at(2026, 0, 15, 23, 59), // 10 days out
+      totalMinutes: SCHEDULER_CONFIG.COMPLETION_DEFAULT_MINUTES,
+      needsInput: false,
+      archetype: "completion",
+      spacingSchedule: null,
+    };
+    const blocks = planSchedule({ now, tasks: [task], busy: [] });
+    expect(blocks).toHaveLength(1);
+    expect((blocks[0].end.getTime() - blocks[0].start.getTime()) / 60000).toBe(
+      SCHEDULER_CONFIG.COMPLETION_DEFAULT_MINUTES
+    );
+    expect(blocks[0].archetype).toBe("completion");
+    // Near the deadline — inside the short lead window, not dumped on day 1.
+    expect(blocks[0].start.getTime()).toBeGreaterThanOrEqual(at(2026, 0, 13, 0, 0).getTime());
+  });
+
+  it("routes a memorization ASSIGNMENT through the spaced path (multi-session, spread, before the date)", () => {
+    const task: PlannableTask = {
+      kind: "assignment", // a Canvas exam, not an entered exam
+      id: "1",
+      title: "Binary Numbers Exam",
+      deadline: at(2026, 0, 15, 10, 0), // 10 days out
+      totalMinutes: 360,
+      needsInput: false,
+      archetype: "memorization",
+      spacingSchedule: "2-3-5-7",
+    };
+    const blocks = planSchedule({ now, tasks: [task], busy: [] });
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    for (const b of blocks) {
+      expect(b.end.getTime()).toBeLessThanOrEqual(task.deadline.getTime());
+      expect(b.archetype).toBe("memorization");
+      expect(b.spacingSchedule).toBe("2-3-5-7");
+    }
+    const days = new Set(blocks.map((b) => b.start.getDate()));
+    expect(days.size).toBeGreaterThanOrEqual(2); // spaced across days, not massed
   });
 });

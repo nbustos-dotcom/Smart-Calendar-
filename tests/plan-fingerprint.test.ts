@@ -23,7 +23,9 @@ const baseInput = (): FingerprintInput => ({
     },
   ],
   exams: [{ id: "e1", examAt: "2026-09-20T10:00:00Z", estPrepMinutes: null, title: "Midterm" }],
-  overrides: [{ canvasAssignmentId: 1, taskCategory: "quiz", estMinutes: null, skip: false }],
+  overrides: [
+    { canvasAssignmentId: 1, taskCategory: "quiz", archetype: "memorization", estMinutes: null, skip: false },
+  ],
   movedBlocks: [{ id: "b1", startsAt: "2026-09-07T18:00:00Z", endsAt: "2026-09-07T19:00:00Z" }],
 });
 
@@ -66,10 +68,18 @@ describe("fingerprintInputs", () => {
     answered.overrides.push({
       canvasAssignmentId: 2,
       taskCategory: "essay",
+      archetype: "production",
       estMinutes: 120,
       skip: false,
     });
     expect(fingerprintInputs(answered)).not.toBe(a);
+  });
+
+  it("changes when the student's archetype answer changes", () => {
+    const a = fingerprintInputs(baseInput());
+    const changed = baseInput();
+    changed.overrides[0].archetype = "completion";
+    expect(fingerprintInputs(changed)).not.toBe(a);
   });
 
   it("is stable when nothing relevant changed", () => {

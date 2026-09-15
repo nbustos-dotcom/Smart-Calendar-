@@ -96,11 +96,11 @@ export async function deleteExamAction(id: string): Promise<ActionResult> {
   return { ok: true };
 }
 
-// Answer a "needs input" question for an assignment: store the type (and an
+// Answer a "needs input" question for an assignment: store the ARCHETYPE (and an
 // optional estimate) so it's never asked again, then re-plan.
 export async function setAssignmentTypeAction(input: {
   canvasAssignmentId: number;
-  category: string;
+  archetype: string;
   estMinutes: number | null;
 }): Promise<ActionResult> {
   const { supabase, user } = await requireUser();
@@ -110,7 +110,7 @@ export async function setAssignmentTypeAction(input: {
     {
       user_id: user.id,
       canvas_assignment_id: input.canvasAssignmentId,
-      task_category: input.category,
+      archetype: input.archetype,
       est_minutes:
         input.estMinutes != null && input.estMinutes > 0
           ? Math.round(input.estMinutes)

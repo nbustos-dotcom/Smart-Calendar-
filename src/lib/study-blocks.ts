@@ -13,13 +13,14 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import {
   planSchedule,
-  resolveDurationMinutes,
+  resolveArchetypeDuration,
+  spacingScheduleFor,
   type BusyInterval,
   type LockedSession,
   type PlannableTask,
 } from "@/lib/scheduler";
-import { SCHEDULER_CONFIG } from "@/lib/scheduler-config";
-import { inferCategory } from "@/lib/task-inference";
+import { SCHEDULER_CONFIG, type Archetype } from "@/lib/scheduler-config";
+import { inferArchetype } from "@/lib/task-inference";
 import {
   expandOccurrencesForRange,
   type OverrideRow,
@@ -40,8 +41,18 @@ type StudyBlockRow = {
   ends_at: string;
   state: "scheduled" | "reserved" | "needs_input";
   reason: string | null;
+  archetype: string | null;
+  spacing_schedule: string | null;
   moved_by_user: boolean;
 };
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+// Whole days from the start of today to the start of a target date (used to pick
+// a memorization task's spaced-review schedule).
+function wholeDaysUntil(now: Date, date: Date): number {
+  return Math.max(0, Math.round((startOfDay(date).getTime() - startOfDay(now).getTime()) / MS_PER_DAY));
+}
 
 // Cheap fingerprint of the scheduler's inputs for the current user: assignments,
 // entered exams, saved answers, and MOVED study blocks. (Not ordinary busy time
@@ -63,7 +74,7 @@ async function currentInputsHash(
     supabase.from("exams").select("id, exam_at, est_prep_minutes, title"),
     supabase
       .from("assignment_overrides")
-      .select("canvas_assignment_id, task_category, est_minutes, skip"),
+      .select("canvas_assignment_id, task_category, archetype, est_minutes, skip"),
     supabase.from("study_blocks").select("id, starts_at, ends_at").eq("moved_by_user", true),
   ]);
 
@@ -86,6 +97,7 @@ async function currentInputsHash(
     overrides: ((overrideRows ?? []) as Record<string, unknown>[]).map((o) => ({
       canvasAssignmentId: Number(o.canvas_assignment_id),
       taskCategory: (o.task_category as string | null) ?? null,
+      archetype: (o.archetype as string | null) ?? null,
       estMinutes: (o.est_minutes as number | null) ?? null,
       skip: Boolean(o.skip),
     })),
@@ -130,7 +142,7 @@ export async function listStudyBlocks(): Promise<StudyBlockItem[]> {
   const { data } = await supabase
     .from("study_blocks")
     .select(
-      "id, source_kind, canvas_assignment_id, exam_id, title, starts_at, ends_at, state, reason, moved_by_user"
+      "id, source_kind, canvas_assignment_id, exam_id, title, starts_at, ends_at, state, reason, archetype, spacing_schedule, moved_by_user"
     )
     .order("starts_at", { ascending: true });
   return ((data ?? []) as StudyBlockRow[]).map((r) => ({
@@ -143,6 +155,8 @@ export async function listStudyBlocks(): Promise<StudyBlockItem[]> {
     ends_at: r.ends_at,
     state: r.state,
     reason: r.reason,
+    archetype: (r.archetype as Archetype | null) ?? null,
+    spacing_schedule: r.spacing_schedule ?? null,
     moved_by_user: r.moved_by_user,
   }));
 }
@@ -179,11 +193,11 @@ export async function runPlanner(): Promise<{
     supabase
       .from("assignments")
       .select(
-        "canvas_assignment_id, title, due_at, submission_types, assignment_group_name, submitted, graded"
+        "canvas_assignment_id, title, due_at, points_possible, submission_types, assignment_group_name, submitted, graded"
       ),
     supabase
       .from("assignment_overrides")
-      .select("canvas_assignment_id, task_category, est_minutes, skip"),
+      .select("canvas_assignment_id, task_category, archetype, est_minutes, skip"),
     supabase.from("exams").select("id, title, exam_at, est_prep_minutes"),
     supabase.from("class_events").select("start_at, end_at"),
     supabase
@@ -207,7 +221,7 @@ export async function runPlanner(): Promise<{
 
   // --- Build the task list (assignments + exams) ----------------------------
   const overridesByCanvasId = new Map(
-    ((assignmentOverrideRows ?? []) as { canvas_assignment_id: number; task_category: string | null; est_minutes: number | null; skip: boolean }[]).map(
+    ((assignmentOverrideRows ?? []) as { canvas_assignment_id: number; task_category: string | null; archetype: string | null; est_minutes: number | null; skip: boolean }[]).map(
       (o) => [Number(o.canvas_assignment_id), o]
     )
   );
@@ -218,6 +232,7 @@ export async function runPlanner(): Promise<{
     canvas_assignment_id: number;
     title: string;
     due_at: string | null;
+    points_possible: number | null;
     submission_types: string[] | null;
     assignment_group_name: string | null;
     submitted: boolean | null;
@@ -231,14 +246,27 @@ export async function runPlanner(): Promise<{
     const ov = overridesByCanvasId.get(Number(a.canvas_assignment_id));
     if (ov?.skip) continue;
 
-    const category =
-      ov?.task_category ??
-      inferCategory({
-        title: a.title,
-        submissionTypes: a.submission_types ?? [],
-        assignmentGroupName: a.assignment_group_name,
-      });
-    const totalMinutes = resolveDurationMinutes(ov?.est_minutes ?? null, category);
+    // Classify into an archetype: a student's confirmed answer wins; otherwise
+    // infer deterministically from Canvas signals. A null archetype is genuinely
+    // ambiguous → we ask once (needs-input).
+    const inferred = inferArchetype({
+      title: a.title,
+      submissionTypes: a.submission_types ?? [],
+      assignmentGroupName: a.assignment_group_name,
+      pointsPossible: a.points_possible,
+    });
+    const archetype = ((ov?.archetype as Archetype | null) ?? inferred.archetype) ?? null;
+    const totalMinutes =
+      archetype == null
+        ? null
+        : resolveArchetypeDuration({
+            estMinutes: ov?.est_minutes ?? null,
+            archetype,
+            subtype: inferred.subtype,
+            points: a.points_possible,
+          });
+    const spacingSchedule =
+      archetype === "memorization" ? spacingScheduleFor(wholeDaysUntil(now, due)) : null;
 
     tasks.push({
       kind: "assignment",
@@ -246,7 +274,9 @@ export async function runPlanner(): Promise<{
       title: a.title,
       deadline: due,
       totalMinutes,
-      needsInput: category == null || totalMinutes == null,
+      needsInput: archetype == null || totalMinutes == null,
+      archetype,
+      spacingSchedule,
     });
   }
 
@@ -269,6 +299,9 @@ export async function runPlanner(): Promise<{
       deadline: at,
       totalMinutes,
       needsInput: false,
+      // Entered exams are always memorization; record their spaced schedule.
+      archetype: "memorization",
+      spacingSchedule: spacingScheduleFor(wholeDaysUntil(now, at)),
     });
   }
 
@@ -351,6 +384,8 @@ export async function runPlanner(): Promise<{
       reason: b.reason,
       session_index: b.sessionIndex,
       session_count: b.sessionCount,
+      archetype: b.archetype,
+      spacing_schedule: b.spacingSchedule,
       moved_by_user: false,
       generated_at: now.toISOString(),
     }));

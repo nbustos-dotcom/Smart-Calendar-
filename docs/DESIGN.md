@@ -197,16 +197,33 @@ tasks + busy time, assert the exact blocks). The pure engine lives in
 > and writing blocks back to Google — is a **later phase** and is deliberately
 > NOT built yet. v1 ships good fixed defaults.
 
-**Two task types, scheduled differently:**
-- **Assignments (Canvas) — deadline-driven.** Place enough work time *before* the due
-  date, split into focus chunks. The type is inferred deterministically from Canvas
-  fields (`submission_types`, `assignment_group_name`, title, points) into a category
-  (reading / quiz / problem_set / lab / essay / project). If the type is genuinely
-  uncertain, the scheduler asks the student **once** and stores the answer
-  (`assignment_overrides`) so it never re-asks.
-- **Exams — spacing-driven.** The student enters them (`exams`). Prep is distributed
-  across several sessions leading up to the test (the spacing effect) rather than
-  massed the night before.
+**Three scheduling archetypes (Stage 1 of the scheduler rewrite).** Every Canvas
+assignment and every entered exam is classified deterministically (keyword + signal
+rules over `submission_types`, `assignment_group_name`, title, `points_possible`; see
+`src/lib/task-inference.ts`) into one archetype, each scheduled differently. When the
+signals are genuinely ambiguous the scheduler asks the student **once** (a 3-choice
+question) and stores the answer in `assignment_overrides.archetype`, so it never re-asks.
+`points_possible` is only a **soft** size/tiebreaker signal (point scales vary by course).
+
+- **Memorization** — exams, tests, quizzes. Prep is distributed across several sessions
+  before the date (the spacing effect). Stage 1 records which spaced-repetition schedule
+  applies — `2-3-5-7` for a date ≤ 2 weeks out, `1-3-7-21` beyond that (gaps widen with
+  distance; Cepeda et al.) — and places via the existing exam-spacing path; **Stage 2**
+  places precisely on the recorded pattern.
+- **Production** — essays, projects, labs, papers, problem sets, readings. Substantial
+  work placed *before* the deadline, split into focus chunks. Duration is sized by
+  sub-type and gently by points. **Stage 3** decomposes these into sub-deadlines with an
+  effort curve.
+- **Completion** — submissions, logs, discussion posts, reflections, "step" check-ins,
+  trivial quizzes. A single small near-deadline block, **never chunked** (this is the
+  archetype that stops a 5-minute submission from getting a full-hour block).
+
+> **Duration defaults** (all tunable in `src/lib/scheduler-config.ts`): completion ~15
+> min; production sized per sub-type (reading 60 · problem set/lab 120 · essay/paper 180 ·
+> project/portfolio 480) then nudged by points; memorization prep per sub-type (quiz 45 ·
+> test 120 · midterm 180 · exam/final 360). Per-archetype buffers (memorization 1.4 /
+> production 1.5 / completion 1.1) are structured so the Stage 4 learning loop can
+> self-correct each independently — **not** learned yet.
 
 **Duration estimation (defeats the planning fallacy).** A fallback ladder:
 1. the student's own estimate → **×1.4 buffer** (fixed this version);

@@ -11,19 +11,22 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { setAssignmentTypeAction } from "@/app/scheduler/actions";
-import { KNOWN_CATEGORIES, type TaskCategory } from "@/lib/scheduler-config";
+import { ARCHETYPES, type Archetype } from "@/lib/scheduler-config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-const CATEGORY_LABELS: Record<TaskCategory, string> = {
-  reading: "Reading",
-  quiz: "Quiz",
-  problem_set: "Homework / problem set",
-  lab: "Lab",
-  essay: "Essay / writing",
-  project: "Project",
+// Plain-language labels + hints for the three scheduling archetypes.
+const ARCHETYPE_LABELS: Record<Archetype, string> = {
+  memorization: "Study for a test",
+  production: "Produce something",
+  completion: "Just complete & submit",
+};
+const ARCHETYPE_HINTS: Record<Archetype, string> = {
+  memorization: "Exam, quiz — spaced review sessions before the date",
+  production: "Essay, project, lab — real work spread before the deadline",
+  completion: "Submission, log, discussion post — one quick block",
 };
 
 export function StudyNeedsInputDialog({
@@ -35,7 +38,7 @@ export function StudyNeedsInputDialog({
   title: string;
   onClose: () => void;
 }) {
-  const [category, setCategory] = useState<TaskCategory | null>(null);
+  const [archetype, setArchetype] = useState<Archetype | null>(null);
   const [hours, setHours] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -49,13 +52,13 @@ export function StudyNeedsInputDialog({
   }, [onClose]);
 
   function save() {
-    if (!category) return;
+    if (!archetype) return;
     const h = parseFloat(hours);
     const estMinutes = hours.trim() && !Number.isNaN(h) && h > 0 ? Math.round(h * 60) : null;
     startTransition(async () => {
       const res = await setAssignmentTypeAction({
         canvasAssignmentId,
-        category,
+        archetype,
         estMinutes,
       });
       if (res.ok) onClose();
@@ -82,21 +85,29 @@ export function StudyNeedsInputDialog({
 
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label>Type</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {KNOWN_CATEGORIES.map((c) => (
+            <Label>What kind of work is it?</Label>
+            <div className="flex flex-col gap-1.5">
+              {ARCHETYPES.map((a) => (
                 <button
-                  key={c}
+                  key={a}
                   type="button"
-                  onClick={() => setCategory(c)}
+                  onClick={() => setArchetype(a)}
                   className={cn(
-                    "rounded-md border px-2.5 py-1.5 text-xs",
-                    category === c
+                    "rounded-md border px-3 py-2 text-left text-sm",
+                    archetype === a
                       ? "border-primary bg-primary text-primary-foreground"
                       : "border-input hover:bg-accent"
                   )}
                 >
-                  {CATEGORY_LABELS[c]}
+                  <span className="font-medium">{ARCHETYPE_LABELS[a]}</span>
+                  <span
+                    className={cn(
+                      "block text-xs",
+                      archetype === a ? "text-primary-foreground/80" : "text-muted-foreground"
+                    )}
+                  >
+                    {ARCHETYPE_HINTS[a]}
+                  </span>
                 </button>
               ))}
             </div>
@@ -127,7 +138,7 @@ export function StudyNeedsInputDialog({
             <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>
               Cancel
             </Button>
-            <Button type="button" onClick={save} disabled={!category || isPending}>
+            <Button type="button" onClick={save} disabled={!archetype || isPending}>
               {isPending ? "Saving…" : "Schedule it"}
             </Button>
           </div>

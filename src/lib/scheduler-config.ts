@@ -74,6 +74,86 @@ export const SCHEDULER_CONFIG = {
   // Length of the small placeholder we hold for a needs-input / no-fit item so
   // it's visible and clickable on the calendar.
   PLACEHOLDER_MINUTES: 30,
+
+  // ==========================================================================
+  // ARCHETYPES (Stage 1 of the scheduler rewrite)
+  //
+  // Every task classifies into one of three SCHEDULING ARCHETYPES, each placed
+  // differently. This replaces the old coarse "everything is a problem_set"
+  // funnel. Classification is deterministic keyword/signal matching (see
+  // src/lib/task-inference.ts); all the words + numbers it uses live here.
+  // ==========================================================================
+
+  // Keyword lists for classification. Matched case-insensitively against the
+  // title + assignment-group text. Order of the RULES (not these lists) resolves
+  // overlaps like "final project" — see inferArchetype. Word-ish boundaries are
+  // applied by the matcher so "lab" doesn't match "syllabus".
+  PRODUCTION_KEYWORDS: [
+    "project", "paper", "essay", "report", "lab", "thesis", "portfolio",
+    "presentation", "milestone", "draft", "problem set", "pset",
+  ] as string[],
+  // Readings fold into production, but only as a WEAK signal checked AFTER
+  // memorization/completion — so "Reading Quiz" is memorization and "Reading
+  // Reflection" is completion, while a plain "Reading: Chapter 5" is production.
+  READING_KEYWORDS: ["reading", "chapter"] as string[],
+  MEMORIZATION_KEYWORDS: ["exam", "test", "midterm", "final", "quiz", "quizzes"] as string[],
+  COMPLETION_KEYWORDS: [
+    "submission", "submit", "log", "reflection", "discussion", "step",
+    "attendance", "check in", "check-in", "checkin", "survey", "peer review",
+    "participation", "warm up", "warm-up", "warmup", "response", "journal entry",
+  ] as string[],
+  // Generic homework wording — a weak, last-resort production signal.
+  GENERIC_PRODUCTION_KEYWORDS: ["homework", "assignment", "hw", "exercise"] as string[],
+  // Canvas submission types that indicate real work to produce and hand in.
+  PRODUCTION_SUBMISSION_TYPES: ["online_upload", "online_text_entry", "media_recording"] as string[],
+
+  // Planning-fallacy buffer applied to the STUDENT'S OWN estimate, per archetype.
+  // Structured per-archetype so the Stage 4 learning loop can self-correct each
+  // independently later; NOT learned yet (fixed values for now).
+  ESTIMATE_BUFFER_BY_ARCHETYPE: {
+    memorization: 1.4,
+    production: 1.5,
+    completion: 1.1,
+  } as Record<string, number>,
+
+  // COMPLETION: one small block, never chunked. Points at or below this nudge an
+  // otherwise-ambiguous item toward completion (soft tiebreaker).
+  COMPLETION_DEFAULT_MINUTES: 15,
+  COMPLETION_MAX_POINTS: 10,
+
+  // PRODUCTION: per-subtype base minutes (already padded), gently scaled by the
+  // points signal when present (soft — point scales vary across courses).
+  PRODUCTION_BASE_MINUTES: {
+    essay: 180, paper: 180, project: 480, portfolio: 480, presentation: 180,
+    report: 150, lab: 120, problem_set: 120, pset: 120, draft: 120,
+    reading: 60, chapter: 60, // readings/chapters are production, sized small
+    default: 120,
+  } as Record<string, number>,
+  // First tier whose maxPoints covers points_possible wins; multiplies the base.
+  POINTS_SIZE_MULTIPLIER: [
+    { maxPoints: 9, multiplier: 0.6 },
+    { maxPoints: 49, multiplier: 1.0 },
+    { maxPoints: 99, multiplier: 1.3 },
+    { maxPoints: Number.POSITIVE_INFINITY, multiplier: 1.6 },
+  ] as { maxPoints: number; multiplier: number }[],
+  PRODUCTION_MIN_MINUTES: 30,
+  PRODUCTION_MAX_MINUTES: 480,
+
+  // MEMORIZATION: total prep minutes by subtype (points soft-adjust these too).
+  MEMORIZATION_BASE_MINUTES: {
+    quiz: 45, test: 120, midterm: 180, exam: 360, final: 360, default: 180,
+  } as Record<string, number>,
+
+  // Spaced-repetition schedules, RECORDED in Stage 1 and PLACED precisely in
+  // Stage 2. Each value lists how many days BEFORE the date to review. Selection
+  // by distance: short retention (soon) → tight gaps, long retention → wider
+  // gaps (Cepeda et al.). Stage 1 placement still uses the existing placeExam
+  // approximation (SPACING_FRACTION) so the app keeps working.
+  SPACING_SCHEDULES: {
+    "2-3-5-7": [7, 5, 3, 2],
+    "1-3-7-21": [21, 7, 3, 1],
+  } as Record<string, number[]>,
+  SPACING_SCHEDULE_LONG_THRESHOLD_DAYS: 14,
 } as const;
 
 // The categories the inference step can assign to a Canvas assignment. `null`
@@ -87,3 +167,9 @@ export const KNOWN_CATEGORIES = [
   "project",
 ] as const;
 export type TaskCategory = (typeof KNOWN_CATEGORIES)[number];
+
+// The three scheduling archetypes (Stage 1). `null` from inference means
+// "genuinely uncertain" → the scheduler asks the student once and stores the
+// answer (assignment_overrides.archetype), so it never re-asks.
+export const ARCHETYPES = ["memorization", "production", "completion"] as const;
+export type Archetype = (typeof ARCHETYPES)[number];

@@ -22,7 +22,7 @@
 // server layer), so this engine just receives a resolved total per task.
 // ============================================================================
 import { addDays, startOfDay } from "@/lib/calendar";
-import { SCHEDULER_CONFIG } from "@/lib/scheduler-config";
+import { SCHEDULER_CONFIG, type Archetype } from "@/lib/scheduler-config";
 
 export type BusyInterval = { start: Date; end: Date };
 
@@ -32,10 +32,24 @@ export type PlannableTask = {
   title: string;
   deadline: Date; // due_at (assignment) or exam_at (exam)
   // Total work minutes AFTER the duration ladder + buffer resolved it. null when
-  // we couldn't resolve it (unknown category) → needsInput.
+  // we couldn't resolve it (unknown archetype) → needsInput.
   totalMinutes: number | null;
   needsInput: boolean; // true → we must ask the student one question
+  // Stage 1: which scheduling archetype this task is, and (memorization only) the
+  // spaced-repetition schedule id we recorded. null archetype ⇒ needsInput. When
+  // omitted entirely, the engine falls back to kind (exam → memorization, else
+  // production) so older callers/fixtures still work.
+  archetype?: Archetype | null;
+  spacingSchedule?: string | null;
 };
+
+// The archetype to actually schedule by: an explicit one wins; otherwise fall
+// back to kind so a task that predates archetypes still routes sensibly.
+function effectiveArchetype(task: PlannableTask): Archetype | null {
+  if (task.archetype !== undefined) return task.archetype;
+  if (task.needsInput || task.totalMinutes == null) return null;
+  return task.kind === "exam" ? "memorization" : "production";
+}
 
 // A study block the student manually moved on a previous run. We keep these
 // fixed (their time is already in `busy`), and — crucially — they COUNT as one
@@ -62,6 +76,10 @@ export type PlannedBlock = {
   reason: string; // plain-language "why", always traceable
   sessionIndex: number; // 1-based
   sessionCount: number;
+  // Stage 1: recorded so the UI can cue archetype and Stage 2 can place
+  // memorization tasks on their spaced pattern.
+  archetype: Archetype | null;
+  spacingSchedule: string | null;
 };
 
 type Config = typeof SCHEDULER_CONFIG;
@@ -86,6 +104,65 @@ export function resolveDurationMinutes(
     return cfg.CATEGORY_DEFAULT_MINUTES[category];
   }
   return null;
+}
+
+// Points signal → gentle size multiplier (soft: point scales vary across
+// courses). No points → no adjustment. First tier whose maxPoints covers it wins.
+function pointsMultiplier(points: number | null, cfg: Config): number {
+  if (points == null) return 1;
+  for (const tier of cfg.POINTS_SIZE_MULTIPLIER) {
+    if (points <= tier.maxPoints) return tier.multiplier;
+  }
+  return 1;
+}
+
+// --- Archetype duration model (Stage 1) --------------------------------------
+// Same fallback ladder as resolveDurationMinutes, but archetype-aware:
+//   1. student estimate × PER-ARCHETYPE buffer;
+//   2. (category history — deferred to the learning loop, skipped);
+//   3. per-archetype, size-aware default (completion fixed; production &
+//      memorization sized by subtype and gently by points_possible).
+// Only called with a known archetype — a null archetype is handled upstream as
+// needs-input. Pure, so it's unit-testable.
+export function resolveArchetypeDuration(input: {
+  estMinutes: number | null;
+  archetype: Archetype;
+  subtype: string | null;
+  points: number | null;
+  cfg?: Config;
+}): number {
+  const cfg = input.cfg ?? SCHEDULER_CONFIG;
+  const { estMinutes, archetype, subtype, points } = input;
+
+  if (estMinutes != null && estMinutes > 0) {
+    const buffer = cfg.ESTIMATE_BUFFER_BY_ARCHETYPE[archetype] ?? cfg.ESTIMATE_BUFFER;
+    return Math.round(estMinutes * buffer);
+  }
+
+  if (archetype === "completion") return cfg.COMPLETION_DEFAULT_MINUTES;
+
+  if (archetype === "production") {
+    const base =
+      cfg.PRODUCTION_BASE_MINUTES[subtype ?? "default"] ??
+      cfg.PRODUCTION_BASE_MINUTES.default;
+    const scaled = base * pointsMultiplier(points, cfg);
+    return Math.round(clamp(scaled, cfg.PRODUCTION_MIN_MINUTES, cfg.PRODUCTION_MAX_MINUTES));
+  }
+
+  // memorization
+  const base =
+    cfg.MEMORIZATION_BASE_MINUTES[subtype ?? "default"] ??
+    cfg.MEMORIZATION_BASE_MINUTES.default;
+  return Math.round(base * pointsMultiplier(points, cfg));
+}
+
+// Pick the spaced-repetition schedule id for a memorization task by distance to
+// the date (recorded in Stage 1; placed precisely in Stage 2). Pure.
+export function spacingScheduleFor(
+  daysUntilDate: number,
+  cfg: Config = SCHEDULER_CONFIG
+): string {
+  return daysUntilDate <= cfg.SPACING_SCHEDULE_LONG_THRESHOLD_DAYS ? "2-3-5-7" : "1-3-7-21";
 }
 
 // --- Start-offset ("don't start too early") ----------------------------------
@@ -309,6 +386,8 @@ export function planSchedule(input: {
   for (const task of tasks) {
     if (task.deadline <= now) continue; // nothing to do for a past deadline
 
+    const archetype = effectiveArchetype(task);
+    const spacingSchedule = task.spacingSchedule ?? null;
     const lockedForTask = lockedByTask.get(`${task.kind}:${task.id}`) ?? [];
 
     if (task.needsInput || task.totalMinutes == null) {
@@ -339,6 +418,8 @@ export function planSchedule(input: {
           reason: "Tell me what kind of task this is and I'll schedule real time for it.",
           sessionIndex: 1,
           sessionCount: 1,
+          archetype: archetype,
+          spacingSchedule: spacingSchedule,
         });
       }
       continue;
@@ -346,7 +427,12 @@ export function planSchedule(input: {
 
     // Full session plan for the task. `count` is the label denominator ("of N")
     // and stays fixed even when some sessions are already locked in by a move.
-    const sessions = splitSessions(task.totalMinutes, cfg);
+    // Completion tasks are a SINGLE small block — never chunked (that's the whole
+    // point of the archetype: a 15-min submission is one block, not "2 of 2").
+    const sessions =
+      archetype === "completion"
+        ? [task.totalMinutes]
+        : splitSessions(task.totalMinutes, cfg);
     const count = sessions.length;
 
     // Reconcile moved blocks: a locked session fills one of the N slots, so we
@@ -367,21 +453,30 @@ export function planSchedule(input: {
     if (untracked > 0) openSlots = openSlots.slice(untracked);
 
     const toPlaceMinutes = openSlots.map((s) => s.minutes);
-    // `placeAssignment` enforces (and updates) the shared daily cap itself. The
-    // exam path is left untouched, so we record ITS placed minutes here so later
-    // assignments still see exam-prep days filling up.
-    const placed: BusyInterval[] =
-      task.kind === "exam"
-        ? placeExam(free, now, task, toPlaceMinutes, cfg)
-        : placeAssignment(free, now, task, toPlaceMinutes, dayLoad, cfg);
-    if (task.kind === "exam") {
+    // Route by ARCHETYPE, not kind: memorization (entered exams AND Canvas
+    // exams/quizzes) uses the spacing path; production and completion use the
+    // lead-window + daily-cap assignment path. `placeAssignment` enforces (and
+    // updates) the shared daily cap itself; the spacing path is left untouched,
+    // so we record ITS placed minutes afterward so later assignments still see
+    // those days filling up.
+    const isMemorization = archetype === "memorization";
+    const placed: BusyInterval[] = isMemorization
+      ? placeExam(free, now, task, toPlaceMinutes, cfg)
+      : placeAssignment(free, now, task, toPlaceMinutes, dayLoad, cfg);
+    if (isMemorization) {
       for (const slot of placed) {
         const key = dayKeyOf(slot.start);
         dayLoad.set(key, (dayLoad.get(key) ?? 0) + slotMinutes(slot));
       }
     }
 
+    // The spacing path (placeExam) decides its own session COUNT from the
+    // days-until-date, which can differ from the chunk count in `openSlots`, so
+    // label memorization blocks by their own sequence; assignment/completion
+    // blocks keep the reconciled open-slot indices (for correct move labels).
+    const labelCount = isMemorization ? placed.length : count;
     placed.forEach((slot, i) => {
+      const idx = isMemorization ? i + 1 : openSlots[i].index;
       out.push({
         sourceKind: task.kind,
         taskId: task.id,
@@ -389,9 +484,11 @@ export function planSchedule(input: {
         start: slot.start,
         end: slot.end,
         state: "scheduled",
-        reason: reasonFor(task, openSlots[i].index, count, slot.start),
-        sessionIndex: openSlots[i].index,
-        sessionCount: count,
+        reason: reasonFor(task, idx, labelCount, slot.start),
+        sessionIndex: idx,
+        sessionCount: labelCount,
+        archetype: archetype,
+        spacingSchedule: spacingSchedule,
       });
     });
 
@@ -426,6 +523,8 @@ export function planSchedule(input: {
           reason: `Not enough free time before the deadline for ~${missing} more min — held as a reminder.`,
           sessionIndex: firstUnplacedIndex,
           sessionCount: count,
+          archetype: archetype,
+          spacingSchedule: spacingSchedule,
         });
       }
     }

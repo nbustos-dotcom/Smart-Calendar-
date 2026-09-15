@@ -39,6 +39,10 @@ export type StudyBlockItem = {
   ends_at: string; // ISO
   state: "scheduled" | "reserved" | "needs_input";
   reason: string | null;
+  // Stage 1 archetype metadata (optional; for a future UI cue). "memorization" |
+  // "production" | "completion", plus the spaced-review schedule id for exams.
+  archetype?: "memorization" | "production" | "completion" | null;
+  spacing_schedule?: string | null;
   moved_by_user: boolean;
 };
 
