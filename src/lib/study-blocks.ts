@@ -11,16 +11,21 @@
 // ============================================================================
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import {
-  planSchedule,
-  resolveArchetypeDuration,
-  spacingScheduleFor,
-  type BusyInterval,
-  type LockedSession,
-  type PlannableTask,
-} from "@/lib/scheduler";
+import { planSchedule } from "@/lib/scheduler";
 import { SCHEDULER_CONFIG, type Archetype } from "@/lib/scheduler-config";
-import { inferArchetype } from "@/lib/task-inference";
+import {
+  buildAssignmentTasks,
+  buildCommitments,
+  buildExamTasks,
+  commitmentsToBusy,
+  movedBlocksToLocked,
+  taskToPlannable,
+  type RawAssignment,
+  type RawExam,
+  type RawMovedBlock,
+  type RawOverride,
+  type Task,
+} from "@/lib/schedule-model";
 import {
   expandOccurrencesForRange,
   type OverrideRow,
@@ -45,14 +50,6 @@ type StudyBlockRow = {
   spacing_schedule: string | null;
   moved_by_user: boolean;
 };
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-// Whole days from the start of today to the start of a target date (used to pick
-// a memorization task's spaced-review schedule).
-function wholeDaysUntil(now: Date, date: Date): number {
-  return Math.max(0, Math.round((startOfDay(date).getTime() - startOfDay(now).getTime()) / MS_PER_DAY));
-}
 
 // Cheap fingerprint of the scheduler's inputs for the current user: assignments,
 // entered exams, saved answers, and MOVED study blocks. (Not ordinary busy time
@@ -121,16 +118,41 @@ export async function ensureSchedulePlanned(): Promise<void> {
   if (!user) return;
 
   const hash = await currentInputsHash(supabase);
+
+  // CONCURRENCY FIX. The old flow read the stored hash, compared, then ran and
+  // wrote the hash afterward — a check-then-act (TOCTOU) race. On a fresh load
+  // two concurrent renders (e.g. a prefetch + the navigation) both saw the old
+  // hash and both ran runPlanner, each doing its own non-atomic delete+insert,
+  // so the plan was inserted twice (the duplicate-blocks bug).
+  //
+  // `claim_study_plan_run` records the new hash and returns TRUE only to the
+  // caller that actually advanced it (an atomic upsert with an is-distinct-from
+  // guard). We claim BEFORE running, so only one concurrent invocation ever
+  // regenerates for a given input set; the others skip. If planning then fails,
+  // we release the claim so the next load retries.
+  const claim = await supabase.rpc("claim_study_plan_run", { p_hash: hash });
+  if (!claim.error) {
+    if (!claim.data) return; // someone else is regenerating this input set, or nothing changed
+    const res = await runPlanner();
+    if (!res.ok) {
+      // Release the claim (blank the hash) so a later load retries.
+      await supabase
+        .from("study_plan_state")
+        .update({ inputs_hash: "", updated_at: new Date().toISOString() })
+        .eq("user_id", user.id);
+    }
+    return;
+  }
+
+  // Fallback for before migration 0011 is applied (RPC not present yet): the
+  // previous compare-then-run behavior, so the app keeps working meanwhile.
   const { data: state } = await supabase
     .from("study_plan_state")
     .select("inputs_hash")
     .maybeSingle();
-
-  if (state?.inputs_hash === hash) return; // nothing relevant changed → skip
-
+  if (state?.inputs_hash === hash) return;
   const res = await runPlanner();
-  if (!res.ok) return; // leave the fingerprint unchanged so we retry next load
-
+  if (!res.ok) return;
   await supabase.from("study_plan_state").upsert(
     { user_id: user.id, inputs_hash: hash, planned_at: new Date().toISOString(), updated_at: new Date().toISOString() },
     { onConflict: "user_id" }
@@ -219,150 +241,45 @@ export async function runPlanner(): Promise<{
     getGoogleCalendarEvents(),
   ]);
 
-  // --- Build the task list (assignments + exams) ----------------------------
+  // --- Build the domain model (Tasks + Commitments), then project it into the
+  // engine's inputs. Same task list and busy set as before — the model layer is
+  // now the single place this is assembled (see src/lib/schedule-model.ts).
   const overridesByCanvasId = new Map(
-    ((assignmentOverrideRows ?? []) as { canvas_assignment_id: number; task_category: string | null; archetype: string | null; est_minutes: number | null; skip: boolean }[]).map(
-      (o) => [Number(o.canvas_assignment_id), o]
-    )
+    ((assignmentOverrideRows ?? []) as RawOverride[]).map((o) => [Number(o.canvas_assignment_id), o])
   );
 
-  const tasks: PlannableTask[] = [];
+  const tasks: Task[] = [
+    ...buildAssignmentTasks((assignmentRows ?? []) as RawAssignment[], overridesByCanvasId, now),
+    ...buildExamTasks((examRows ?? []) as RawExam[], now),
+  ];
 
-  for (const a of (assignmentRows ?? []) as {
-    canvas_assignment_id: number;
-    title: string;
-    due_at: string | null;
-    points_possible: number | null;
-    submission_types: string[] | null;
-    assignment_group_name: string | null;
-    submitted: boolean | null;
-    graded: boolean | null;
-  }[]) {
-    if (!a.due_at) continue; // no due date → shown honestly elsewhere, not scheduled
-    const due = new Date(a.due_at);
-    if (due <= now) continue; // past due
-    if (a.submitted || a.graded) continue; // already done on Canvas
-
-    const ov = overridesByCanvasId.get(Number(a.canvas_assignment_id));
-    if (ov?.skip) continue;
-
-    // Classify into an archetype: a student's confirmed answer wins; otherwise
-    // infer deterministically from Canvas signals. A null archetype is genuinely
-    // ambiguous → we ask once (needs-input).
-    const inferred = inferArchetype({
-      title: a.title,
-      submissionTypes: a.submission_types ?? [],
-      assignmentGroupName: a.assignment_group_name,
-      pointsPossible: a.points_possible,
-    });
-    const archetype = ((ov?.archetype as Archetype | null) ?? inferred.archetype) ?? null;
-    const totalMinutes =
-      archetype == null
-        ? null
-        : resolveArchetypeDuration({
-            estMinutes: ov?.est_minutes ?? null,
-            archetype,
-            subtype: inferred.subtype,
-            points: a.points_possible,
-          });
-    const spacingSchedule =
-      archetype === "memorization" ? spacingScheduleFor(wholeDaysUntil(now, due)) : null;
-
-    tasks.push({
-      kind: "assignment",
-      id: String(a.canvas_assignment_id),
-      title: a.title,
-      deadline: due,
-      totalMinutes,
-      needsInput: archetype == null || totalMinutes == null,
-      archetype,
-      spacingSchedule,
-    });
-  }
-
-  for (const e of (examRows ?? []) as {
-    id: string;
-    title: string;
-    exam_at: string;
-    est_prep_minutes: number | null;
-  }[]) {
-    const at = new Date(e.exam_at);
-    if (at <= now) continue;
-    const totalMinutes =
-      e.est_prep_minutes != null && e.est_prep_minutes > 0
-        ? Math.round(e.est_prep_minutes * SCHEDULER_CONFIG.ESTIMATE_BUFFER)
-        : SCHEDULER_CONFIG.EXAM_DEFAULT_PREP_MINUTES;
-    tasks.push({
-      kind: "exam",
-      id: e.id,
-      title: e.title,
-      deadline: at,
-      totalMinutes,
-      needsInput: false,
-      // Entered exams are always memorization; record their spaced schedule.
-      archetype: "memorization",
-      spacingSchedule: spacingScheduleFor(wholeDaysUntil(now, at)),
-    });
-  }
-
-  // --- Gather busy time -----------------------------------------------------
-  const busy: BusyInterval[] = [];
-  const pushInterval = (s: string | null, e: string | null) => {
-    if (!s || !e) return;
-    const start = new Date(s);
-    const end = new Date(e);
-    if (end > start) busy.push({ start, end });
-  };
-
-  for (const c of (classEventRows ?? []) as { start_at: string | null; end_at: string | null }[]) {
-    pushInterval(c.start_at, c.end_at);
-  }
-  for (const g of googleEvents) pushInterval(g.start_at, g.end_at);
-
-  // Moved study blocks are both (a) fixed busy time we schedule around, and
-  // (b) a session the student has already placed for their task, so it must
-  // COUNT as one of that task's sessions on regen (otherwise a 3-session task
-  // with 1 moved block would regenerate 3 more → 4 total). We build both here.
-  const locked: LockedSession[] = [];
-  for (const m of (movedBlockRows ?? []) as {
-    source_kind: "assignment" | "exam";
-    canvas_assignment_id: number | null;
-    exam_id: string | null;
-    starts_at: string;
-    ends_at: string;
-    session_index: number | null;
-  }[]) {
-    pushInterval(m.starts_at, m.ends_at);
-    const taskId =
-      m.source_kind === "assignment"
-        ? m.canvas_assignment_id != null
-          ? String(m.canvas_assignment_id)
-          : null
-        : m.exam_id;
-    if (!taskId) continue; // can't tie it to a task → keep only as busy time
-    const start = new Date(m.starts_at);
-    const end = new Date(m.ends_at);
-    if (end <= start) continue;
-    locked.push({
-      sourceKind: m.source_kind,
-      taskId,
-      sessionIndex: m.session_index ?? null,
-      start,
-      end,
-    });
-  }
-  // The user's own events, expanded into concrete occurrences over the horizon
-  // (honoring per-occurrence moves/cancellations).
+  // Fixed commitments (busy time): classes, Google, moved study blocks, and the
+  // student's own recurring events expanded into concrete occurrences.
   const occurrences = expandOccurrencesForRange(
     (userEventRows ?? []) as unknown as UserEventRow[],
     (userEventOverrideRows ?? []) as unknown as OverrideRow[],
     startOfDay(now),
     horizonEnd
   );
-  for (const o of occurrences) busy.push({ start: o.start, end: o.end });
+  const movedBlocks = (movedBlockRows ?? []) as RawMovedBlock[];
+  const commitments = buildCommitments({
+    classEvents: (classEventRows ?? []) as { start_at: string | null; end_at: string | null }[],
+    googleEvents: googleEvents as { start_at: string | null; end_at: string | null }[],
+    movedBlocks,
+    userOccurrences: occurrences.map((o) => ({ start: o.start, end: o.end })),
+  });
+
+  // A moved study block is also a locked session (counts as one of its task's
+  // sessions) so regen doesn't duplicate it.
+  const locked = movedBlocksToLocked(movedBlocks);
 
   // --- Plan ------------------------------------------------------------------
-  const planned = planSchedule({ now, tasks, busy, locked });
+  const planned = planSchedule({
+    now,
+    tasks: tasks.map(taskToPlannable),
+    busy: commitmentsToBusy(commitments),
+    locked,
+  });
 
   // --- Persist: replace auto blocks, keep the ones the student moved --------
   await supabase
@@ -386,6 +303,9 @@ export async function runPlanner(): Promise<{
       session_count: b.sessionCount,
       archetype: b.archetype,
       spacing_schedule: b.spacingSchedule,
+      // NOTE: estimate_minutes / estimate_basis columns are added by migration
+      // 0011 as the data-collection substrate, but are POPULATED starting in
+      // Stage D — Stage A writes the same columns as before (no new dependency).
       moved_by_user: false,
       generated_at: now.toISOString(),
     }));
