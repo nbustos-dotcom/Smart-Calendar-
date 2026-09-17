@@ -49,13 +49,51 @@ export const SCHEDULER_CONFIG = {
     { maxMinutes: Number.POSITIVE_INFINITY, leadDays: 21 }, // huge: ~3 weeks
   ] as { maxMinutes: number; leadDays: number }[],
 
-  // Honesty backstop: the most study/work minutes we'll schedule on any ONE day
-  // (summed across all tasks + entered exam prep). WHY: even inside a lead window
-  // we must never cram a whole workload into a single day and present it as a
-  // real plan. Work that can't fit under this cap before its deadline becomes a
-  // `reserved` block (honest "not enough capacity"), never silently dropped and
-  // never overflowing the day. Tunable knob (a few hours/day).
+  // Honesty backstop (LEGACY — superseded in Stage B by per-day capacities in
+  // AVAILABILITY_DEFAULTS / student_preferences; kept only for back-compat).
   MAX_STUDY_MINUTES_PER_DAY: 180, // 3 hours/day
+
+  // ==========================================================================
+  // AVAILABILITY & PLACEMENT (Stage B) — the "reasonable hours" model + the
+  // scoring weights for the unified placement engine. These are the DEFAULTS
+  // used when a student has no `student_preferences` row yet.
+  // ==========================================================================
+
+  // Per-day work windows (minute-of-day) and daily study capacity, weekday vs
+  // weekend. Weekends start later and never touch early morning — this is what
+  // stops the old "8am Saturday stacking". Never overnight: windows sit inside a
+  // single day. Mirror the student_preferences column defaults (migration 0011).
+  AVAILABILITY_DEFAULTS: {
+    weekdayStartMinute: 540, // 09:00
+    weekdayEndMinute: 1320, // 22:00
+    weekendStartMinute: 600, // 10:00
+    weekendEndMinute: 1200, // 20:00
+    maxWeekdayMinutes: 180, // daily study cap (weekday)
+    maxWeekendMinutes: 240, // daily study cap (weekend)
+  },
+
+  // Time-of-day QUALITY: how good each part of the day is for studying. The
+  // engine prefers higher-quality time and only spills into lower quality under
+  // pressure. First band that covers a minute-of-day wins; bands must span the
+  // availability windows. Higher weight = better.
+  QUALITY_BANDS: [
+    { startMin: 0, endMin: 600, weight: 0.3 }, // before 10:00 — poor
+    { startMin: 600, endMin: 900, weight: 0.7 }, // 10:00–15:00 — ok
+    { startMin: 900, endMin: 1260, weight: 1.0 }, // 15:00–21:00 — prime
+    { startMin: 1260, endMin: 1440, weight: 0.5 }, // after 21:00 — winding down
+  ] as { startMin: number; endMin: number; weight: number }[],
+
+  // Scoring weights for choosing a DAY for each session:
+  //   score = SPREAD·(−|day − idealDay|) + LEVEL·(remaining/capacity) + QUALITY·q
+  // SPREAD dominates (smoothing: sessions gravitate to their evenly-spaced target
+  // day), LEVEL breaks ties toward emptier days (leveling), QUALITY nudges toward
+  // days that still have good hours. Within a day, the best-quality slot is chosen.
+  PLACEMENT: {
+    GRANULARITY_MINUTES: 30, // candidate-start step when scanning a day
+    WEIGHT_SPREAD: 10,
+    WEIGHT_LEVEL: 2,
+    WEIGHT_QUALITY: 1,
+  },
 
   // Fixed per-category default TOTAL work minutes. Used as-is (already padded).
   // The duration ladder falls back to these when the student gave no estimate.

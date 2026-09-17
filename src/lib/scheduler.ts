@@ -1,25 +1,25 @@
 // ============================================================================
-// SCHEDULER — the deterministic study-block placement engine
+// SCHEDULER — the deterministic study-block placement engine (Stage B)
 //
-// Pure functions: (tasks + real busy time + config) → planned study blocks. No
-// DB, no network, no randomness, NO AI. The same inputs always produce the same
-// plan, which makes the whole thing unit-testable (see tests/scheduler.test.ts).
+// Pure functions: (tasks + real busy time + preferences + config) → planned
+// study blocks. No DB, no network, no randomness, NO AI. Same inputs always
+// produce the same plan (unit-tested in tests/scheduler.test.ts).
 //
-// What it does, in plain steps:
-//   1. Build FREE intervals inside the daily window (08:00–22:00), from now to a
-//      bounded horizon, by subtracting all busy time (classes, the user's own
-//      events, Google events, and study blocks the student has manually moved).
-//   2. Order tasks by urgency (earliest deadline first).
-//   3. For each task, resolve how many focus sessions it needs and place them:
-//        - assignments: spread across [now, due] EARLIEST-first, guaranteed to
-//          finish before the deadline (backward-bounded, earlier-biased).
-//        - exams: spaced across [now, exam] using the spacing effect
-//          (gap ≈ SPACING_FRACTION × days-until-test), earliest-first.
-//      Each placed slot is removed from free time so nothing double-books.
-//   4. Assign a three-state honesty label: scheduled / reserved / needs_input.
+// ONE unified placement pass replaces the old scattered greedy placers. For each
+// session it SCORES every candidate day against three things and places the
+// session in the best-scoring available slot:
 //
-// Duration estimation (the ladder) and category inference happen UPSTREAM (the
-// server layer), so this engine just receives a resolved total per task.
+//   score(day) = SPREAD·(−|day − idealDay|)      ← smoothing: spread a task's
+//                                                   sessions across its window
+//              + LEVEL·(remainingCapacity/cap)   ← leveling: balance daily load
+//                                                   across ALL tasks combined
+//              + QUALITY·(best time-of-day there) ← reasonable hours
+//
+// and within the chosen day it takes the best-QUALITY free sub-slot. Availability
+// comes from the student's weekday/weekend windows (never overnight); work that
+// can't fit under daily capacity before a deadline becomes a `reserved` block
+// (honest), never crammed and never dropped. Moved blocks stay fixed (they are
+// in `busy` and counted as their task's sessions), so regen is non-destructive.
 // ============================================================================
 import { addDays, startOfDay } from "@/lib/calendar";
 import { SCHEDULER_CONFIG, type Archetype } from "@/lib/scheduler-config";
@@ -35,27 +35,16 @@ export type PlannableTask = {
   // we couldn't resolve it (unknown archetype) → needsInput.
   totalMinutes: number | null;
   needsInput: boolean; // true → we must ask the student one question
-  // Stage 1: which scheduling archetype this task is, and (memorization only) the
+  // Which scheduling archetype this task is, and (memorization only) the
   // spaced-repetition schedule id we recorded. null archetype ⇒ needsInput. When
-  // omitted entirely, the engine falls back to kind (exam → memorization, else
-  // production) so older callers/fixtures still work.
+  // omitted, the engine falls back to kind (exam → memorization, else production).
   archetype?: Archetype | null;
   spacingSchedule?: string | null;
 };
 
-// The archetype to actually schedule by: an explicit one wins; otherwise fall
-// back to kind so a task that predates archetypes still routes sensibly.
-function effectiveArchetype(task: PlannableTask): Archetype | null {
-  if (task.archetype !== undefined) return task.archetype;
-  if (task.needsInput || task.totalMinutes == null) return null;
-  return task.kind === "exam" ? "memorization" : "production";
-}
-
-// A study block the student manually moved on a previous run. We keep these
-// fixed (their time is already in `busy`), and — crucially — they COUNT as one
-// of their task's sessions so a re-plan doesn't re-create work the student has
-// already placed. Matched to a task by (sourceKind, taskId); sessionIndex tells
-// us which session slot it fills so the remaining sessions get the right labels.
+// A study block the student manually moved on a previous run. Its time is in
+// `busy` (so nothing double-books it); it also COUNTS as one of its task's
+// sessions so a re-plan doesn't re-create work the student already placed.
 export type LockedSession = {
   sourceKind: "assignment" | "exam";
   taskId: string;
@@ -76,54 +65,53 @@ export type PlannedBlock = {
   reason: string; // plain-language "why", always traceable
   sessionIndex: number; // 1-based
   sessionCount: number;
-  // Stage 1: recorded so the UI can cue archetype and Stage 2 can place
-  // memorization tasks on their spaced pattern.
   archetype: Archetype | null;
   spacingSchedule: string | null;
+};
+
+// The student's reasonable-hours model. Read from `student_preferences` when a
+// row exists, else the config defaults (see resolvePreferences).
+export type PlacementPreferences = {
+  weekdayStartMinute: number;
+  weekdayEndMinute: number;
+  weekendStartMinute: number;
+  weekendEndMinute: number;
+  maxWeekdayMinutes: number;
+  maxWeekendMinutes: number;
+  qualityBands: { startMin: number; endMin: number; weight: number }[];
 };
 
 type Config = typeof SCHEDULER_CONFIG;
 
 const MS_PER_MIN = 60_000;
 const MS_PER_DAY = 24 * 60 * MS_PER_MIN;
+const EPS = 1e-9;
 
-// --- Duration fallback ladder ------------------------------------------------
-// Student's own estimate (×1.4 buffer) → category default (used as-is, already
-// padded) → null (unknown → the caller marks the task needs-input). The
-// "category history average" rung is deferred (no data until the learning loop),
-// so in v1 it's simply skipped. Pure so it's unit-testable.
+// The archetype to schedule by: an explicit one wins; otherwise fall back to kind.
+function effectiveArchetype(task: PlannableTask): Archetype | null {
+  if (task.archetype !== undefined) return task.archetype;
+  if (task.needsInput || task.totalMinutes == null) return null;
+  return task.kind === "exam" ? "memorization" : "production";
+}
+
+// --- Duration ladder + estimation (unchanged; pure, exported for reuse/tests) --
+
 export function resolveDurationMinutes(
   estMinutes: number | null,
   category: string | null,
   cfg: Config = SCHEDULER_CONFIG
 ): number | null {
-  if (estMinutes != null && estMinutes > 0) {
-    return Math.round(estMinutes * cfg.ESTIMATE_BUFFER);
-  }
-  if (category && cfg.CATEGORY_DEFAULT_MINUTES[category] != null) {
-    return cfg.CATEGORY_DEFAULT_MINUTES[category];
-  }
+  if (estMinutes != null && estMinutes > 0) return Math.round(estMinutes * cfg.ESTIMATE_BUFFER);
+  if (category && cfg.CATEGORY_DEFAULT_MINUTES[category] != null) return cfg.CATEGORY_DEFAULT_MINUTES[category];
   return null;
 }
 
-// Points signal → gentle size multiplier (soft: point scales vary across
-// courses). No points → no adjustment. First tier whose maxPoints covers it wins.
 function pointsMultiplier(points: number | null, cfg: Config): number {
   if (points == null) return 1;
-  for (const tier of cfg.POINTS_SIZE_MULTIPLIER) {
-    if (points <= tier.maxPoints) return tier.multiplier;
-  }
+  for (const tier of cfg.POINTS_SIZE_MULTIPLIER) if (points <= tier.maxPoints) return tier.multiplier;
   return 1;
 }
 
-// --- Archetype duration model (Stage 1) --------------------------------------
-// Same fallback ladder as resolveDurationMinutes, but archetype-aware:
-//   1. student estimate × PER-ARCHETYPE buffer;
-//   2. (category history — deferred to the learning loop, skipped);
-//   3. per-archetype, size-aware default (completion fixed; production &
-//      memorization sized by subtype and gently by points_possible).
-// Only called with a known archetype — a null archetype is handled upstream as
-// needs-input. Pure, so it's unit-testable.
 export function resolveArchetypeDuration(input: {
   estMinutes: number | null;
   archetype: Archetype;
@@ -133,77 +121,118 @@ export function resolveArchetypeDuration(input: {
 }): number {
   const cfg = input.cfg ?? SCHEDULER_CONFIG;
   const { estMinutes, archetype, subtype, points } = input;
-
   if (estMinutes != null && estMinutes > 0) {
     const buffer = cfg.ESTIMATE_BUFFER_BY_ARCHETYPE[archetype] ?? cfg.ESTIMATE_BUFFER;
     return Math.round(estMinutes * buffer);
   }
-
   if (archetype === "completion") return cfg.COMPLETION_DEFAULT_MINUTES;
-
   if (archetype === "production") {
-    const base =
-      cfg.PRODUCTION_BASE_MINUTES[subtype ?? "default"] ??
-      cfg.PRODUCTION_BASE_MINUTES.default;
-    const scaled = base * pointsMultiplier(points, cfg);
-    return Math.round(clamp(scaled, cfg.PRODUCTION_MIN_MINUTES, cfg.PRODUCTION_MAX_MINUTES));
+    const base = cfg.PRODUCTION_BASE_MINUTES[subtype ?? "default"] ?? cfg.PRODUCTION_BASE_MINUTES.default;
+    return Math.round(clamp(base * pointsMultiplier(points, cfg), cfg.PRODUCTION_MIN_MINUTES, cfg.PRODUCTION_MAX_MINUTES));
   }
-
-  // memorization
-  const base =
-    cfg.MEMORIZATION_BASE_MINUTES[subtype ?? "default"] ??
-    cfg.MEMORIZATION_BASE_MINUTES.default;
+  const base = cfg.MEMORIZATION_BASE_MINUTES[subtype ?? "default"] ?? cfg.MEMORIZATION_BASE_MINUTES.default;
   return Math.round(base * pointsMultiplier(points, cfg));
 }
 
-// Pick the spaced-repetition schedule id for a memorization task by distance to
-// the date (recorded in Stage 1; placed precisely in Stage 2). Pure.
-export function spacingScheduleFor(
-  daysUntilDate: number,
-  cfg: Config = SCHEDULER_CONFIG
-): string {
+export function spacingScheduleFor(daysUntilDate: number, cfg: Config = SCHEDULER_CONFIG): string {
   return daysUntilDate <= cfg.SPACING_SCHEDULE_LONG_THRESHOLD_DAYS ? "2-3-5-7" : "1-3-7-21";
 }
 
-// --- Start-offset ("don't start too early") ----------------------------------
-// How many days before the due date an assignment's work may begin, from the
-// LEAD_DAYS ladder: bigger tasks earn a longer lead. Pure so it's unit-testable.
+// How many days before the deadline a task's work may begin (bounds the smoothing
+// window so far-future work doesn't surface now). Bigger tasks earn a longer lead.
 export function leadDaysFor(totalMinutes: number, cfg: Config = SCHEDULER_CONFIG): number {
-  for (const tier of cfg.LEAD_DAYS) {
-    if (totalMinutes <= tier.maxMinutes) return tier.leadDays;
-  }
-  // Defensive: LEAD_DAYS always ends in an Infinity tier, so this is unreachable.
+  for (const tier of cfg.LEAD_DAYS) if (totalMinutes <= tier.maxMinutes) return tier.leadDays;
   return cfg.LEAD_DAYS[cfg.LEAD_DAYS.length - 1]?.leadDays ?? cfg.HORIZON_DAYS;
 }
 
-// --- Free-time construction --------------------------------------------------
+// Split a total into nearly-equal focus sessions, each no longer than the cap.
+function splitSessions(total: number, cfg: Config): number[] {
+  if (total <= 0) return [];
+  if (total <= cfg.CHUNK_CAP_MINUTES) return [total];
+  const count = Math.ceil(total / cfg.CHUNK_CAP_MINUTES);
+  const base = Math.floor(total / count);
+  const remainder = total - base * count;
+  return Array.from({ length: count }, (_, i) => base + (i < remainder ? 1 : 0));
+}
 
-// The daily working window [start, end) for a given day.
-function windowFor(day: Date, cfg: Config): BusyInterval {
+function daysUntil(now: Date, deadline: Date): number {
+  return Math.max(0, Math.round((startOfDay(deadline).getTime() - startOfDay(now).getTime()) / MS_PER_DAY));
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function dayKeyOf(d: Date): number {
+  return startOfDay(d).getTime();
+}
+
+function slotMinutes(slot: BusyInterval): number {
+  return (slot.end.getTime() - slot.start.getTime()) / MS_PER_MIN;
+}
+
+// --- Availability & quality (the "reasonable hours" model) -------------------
+
+export function resolvePreferences(
+  p: Partial<PlacementPreferences> | undefined,
+  cfg: Config = SCHEDULER_CONFIG
+): PlacementPreferences {
+  const d = cfg.AVAILABILITY_DEFAULTS;
+  return {
+    weekdayStartMinute: p?.weekdayStartMinute ?? d.weekdayStartMinute,
+    weekdayEndMinute: p?.weekdayEndMinute ?? d.weekdayEndMinute,
+    weekendStartMinute: p?.weekendStartMinute ?? d.weekendStartMinute,
+    weekendEndMinute: p?.weekendEndMinute ?? d.weekendEndMinute,
+    maxWeekdayMinutes: p?.maxWeekdayMinutes ?? d.maxWeekdayMinutes,
+    maxWeekendMinutes: p?.maxWeekendMinutes ?? d.maxWeekendMinutes,
+    qualityBands: p?.qualityBands && p.qualityBands.length > 0 ? p.qualityBands : [...cfg.QUALITY_BANDS],
+  };
+}
+
+function isWeekend(day: Date): boolean {
+  const w = day.getDay();
+  return w === 0 || w === 6;
+}
+
+function minuteOfDay(d: Date): number {
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+function dayWindowMinutes(day: Date, prefs: PlacementPreferences): { start: number; end: number } {
+  return isWeekend(day)
+    ? { start: prefs.weekendStartMinute, end: prefs.weekendEndMinute }
+    : { start: prefs.weekdayStartMinute, end: prefs.weekdayEndMinute };
+}
+
+function dayCapacity(day: Date, prefs: PlacementPreferences): number {
+  return isWeekend(day) ? prefs.maxWeekendMinutes : prefs.maxWeekdayMinutes;
+}
+
+function windowFor(day: Date, prefs: PlacementPreferences): BusyInterval {
+  const w = dayWindowMinutes(day, prefs);
   const start = new Date(day);
-  start.setHours(cfg.DAY_WINDOW_START_HOUR, 0, 0, 0);
+  start.setHours(Math.floor(w.start / 60), w.start % 60, 0, 0);
   const end = new Date(day);
-  end.setHours(cfg.DAY_WINDOW_END_HOUR, 0, 0, 0);
+  end.setHours(Math.floor(w.end / 60), w.end % 60, 0, 0);
   return { start, end };
 }
 
-// Free intervals inside every day's window from `now` to `horizonEnd`, with all
-// busy time subtracted. Never includes the past. Sorted by start.
+// Free intervals inside every day's AVAILABILITY window from `now` to horizon,
+// with all busy time subtracted. Never past, never overnight. Reuses the classic
+// window-minus-busy subtraction; the window now varies weekday vs weekend.
 function buildFreeIntervals(
   now: Date,
   horizonEnd: Date,
   busy: BusyInterval[],
-  cfg: Config
+  prefs: PlacementPreferences
 ): BusyInterval[] {
   const free: BusyInterval[] = [];
   let day = startOfDay(now);
   while (day <= horizonEnd) {
-    const win = windowFor(day, cfg);
-    // Clamp to [now, horizonEnd] so we never plan in the past or past the cap.
+    const win = windowFor(day, prefs);
     const winStart = new Date(Math.max(win.start.getTime(), now.getTime()));
     const winEnd = new Date(Math.min(win.end.getTime(), horizonEnd.getTime()));
     if (winStart < winEnd) {
-      // Subtract busy intervals that overlap this window.
       const cuts = busy
         .filter((b) => b.end > winStart && b.start < winEnd)
         .sort((a, b) => a.start.getTime() - b.start.getTime());
@@ -222,140 +251,98 @@ function buildFreeIntervals(
   return free.sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
-// Take the earliest free sub-slot of `minutes` length within [after, before].
-// Mutates `free` (removes the carved time). Returns the placed slot or null.
-function takeEarliestSlot(
+// Average time-of-day quality over [startMin, endMin) — exact piecewise integral
+// over the quality bands, so a session that straddles two bands is scored fairly.
+function windowQuality(startMin: number, endMin: number, prefs: PlacementPreferences): number {
+  const span = endMin - startMin;
+  if (span <= 0) return 0;
+  let sum = 0;
+  for (const band of prefs.qualityBands) {
+    const s = Math.max(startMin, band.startMin);
+    const e = Math.min(endMin, band.endMin);
+    if (e > s) sum += (e - s) * band.weight;
+  }
+  return sum / span;
+}
+
+// Best-quality free sub-slot of `minutes` on ONE day, within [lo, hi]. Scans
+// candidate starts at GRANULARITY steps and keeps the highest-quality one
+// (earliest wins ties). Returns null if nothing of that length fits that day.
+function bestSlotInDay(
   free: BusyInterval[],
-  after: Date,
-  before: Date,
-  minutes: number
-): BusyInterval | null {
+  dayKey: number,
+  minutes: number,
+  lo: Date,
+  hi: Date,
+  prefs: PlacementPreferences,
+  cfg: Config
+): { start: Date; end: Date; quality: number } | null {
   const need = minutes * MS_PER_MIN;
+  const step = cfg.PLACEMENT.GRANULARITY_MINUTES * MS_PER_MIN;
+  let best: { startMs: number; quality: number } | null = null;
+  for (const iv of free) {
+    if (dayKeyOf(iv.start) !== dayKey) continue;
+    const s0 = Math.max(iv.start.getTime(), lo.getTime());
+    const e0 = Math.min(iv.end.getTime(), hi.getTime());
+    if (e0 - s0 < need) continue;
+    const lastStart = e0 - need;
+    for (let t = s0; t <= lastStart + EPS; t += step) {
+      const startMin = minuteOfDay(new Date(t));
+      const q = windowQuality(startMin, startMin + minutes, prefs);
+      if (best === null || q > best.quality + EPS) best = { startMs: t, quality: q };
+    }
+    // Always consider the exact latest position too, so end-of-window prime time
+    // is never missed by the coarse step.
+    const startMinLast = minuteOfDay(new Date(lastStart));
+    const qLast = windowQuality(startMinLast, startMinLast + minutes, prefs);
+    if (best === null || qLast > best.quality + EPS) best = { startMs: lastStart, quality: qLast };
+  }
+  if (best === null) return null;
+  return { start: new Date(best.startMs), end: new Date(best.startMs + need), quality: best.quality };
+}
+
+// Carve a specific placed slot out of the free list (splice + leftovers).
+function takeSpecificSlot(free: BusyInterval[], slot: BusyInterval): void {
+  const s = slot.start.getTime();
+  const e = slot.end.getTime();
   for (let i = 0; i < free.length; i++) {
     const iv = free[i];
-    const s = Math.max(iv.start.getTime(), after.getTime());
-    const e = Math.min(iv.end.getTime(), before.getTime());
-    if (e - s >= need) {
-      const placed = { start: new Date(s), end: new Date(s + need) };
-      // Replace this interval with whatever is left on either side of the carve.
+    if (iv.start.getTime() <= s && iv.end.getTime() >= e) {
       const leftovers: BusyInterval[] = [];
-      if (s > iv.start.getTime()) leftovers.push({ start: iv.start, end: new Date(s) });
-      if (iv.end.getTime() > s + need) leftovers.push({ start: new Date(s + need), end: iv.end });
+      if (iv.start.getTime() < s) leftovers.push({ start: iv.start, end: new Date(s) });
+      if (iv.end.getTime() > e) leftovers.push({ start: new Date(e), end: iv.end });
       free.splice(i, 1, ...leftovers);
-      return placed;
+      return;
     }
   }
-  return null;
 }
 
-// --- Session sizing ----------------------------------------------------------
-
-// Split a total into nearly-equal focus sessions, each no longer than the cap.
-function splitSessions(total: number, cfg: Config): number[] {
-  if (total <= 0) return [];
-  if (total <= cfg.CHUNK_CAP_MINUTES) return [total];
-  const count = Math.ceil(total / cfg.CHUNK_CAP_MINUTES);
-  const base = Math.floor(total / count);
-  const remainder = total - base * count;
-  // Hand the remainder minutes to the earliest sessions, one each.
-  return Array.from({ length: count }, (_, i) => base + (i < remainder ? 1 : 0));
+function offsetToDay(now: Date, offset: number): Date {
+  return addDays(startOfDay(now), offset);
 }
 
-// Whole days from the start of `now`'s day to the deadline's day.
-function daysUntil(now: Date, deadline: Date): number {
-  return Math.max(
-    0,
-    Math.round((startOfDay(deadline).getTime() - startOfDay(now).getTime()) / MS_PER_DAY)
-  );
-}
-
-function clamp(n: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, n));
-}
-
-// Bounds of one day-offset's window, intersected with [now, deadline].
-function dayBounds(now: Date, deadline: Date, offset: number): { after: Date; before: Date } {
-  const day = addDays(startOfDay(now), offset);
-  const after = new Date(Math.max(day.getTime(), now.getTime()));
-  const before = new Date(Math.min(addDays(day, 1).getTime(), deadline.getTime()));
-  return { after, before };
-}
-
-// Key a day for the shared daily-load map (the workload cap): the local
-// midnight timestamp of whatever day a slot falls on.
-function dayKeyOf(d: Date): number {
-  return startOfDay(d).getTime();
-}
-
-// Minutes a slot occupies.
-function slotMinutes(slot: BusyInterval): number {
-  return (slot.end.getTime() - slot.start.getTime()) / MS_PER_MIN;
-}
-
-// Place ONE placeholder block (a reserved shortfall or a needs-input marker)
-// under the SAME rules as real work: only inside the lead window
-// [due − leadDays, due], earliest-first within that window, and never onto a day
-// already at the daily cap. Books the block against `dayLoad` and returns it, or
-// returns null when it can't fit — in which case the caller emits NOTHING,
-// deferring the block to a future run (once the window opens / capacity frees)
-// rather than dumping it on the earliest day. `leadBasisMinutes` sizes the lead
-// window (the task's real total for reserved; the placeholder size for a
-// needs-input task, whose real size is unknown).
-function placeWithinLeadWindow(
-  free: BusyInterval[],
-  now: Date,
-  deadline: Date,
-  leadBasisMinutes: number,
-  blockMinutes: number,
-  dayLoad: Map<number, number>,
-  cfg: Config
-): BusyInterval | null {
-  const lastDay = daysUntil(now, deadline);
-  const lead = leadDaysFor(leadBasisMinutes, cfg);
-  const firstDay = Math.max(0, lastDay - lead);
-  for (let offset = firstDay; offset <= lastDay; offset++) {
-    const { after, before } = dayBounds(now, deadline, offset);
-    if (after >= before) continue;
-    const dayKey = dayKeyOf(addDays(startOfDay(now), offset));
-    const used = dayLoad.get(dayKey) ?? 0;
-    if (used + blockMinutes > cfg.MAX_STUDY_MINUTES_PER_DAY) continue; // day full
-    const slot = takeEarliestSlot(free, after, before, blockMinutes);
-    if (slot) {
-      dayLoad.set(dayKey, used + blockMinutes);
-      return slot;
-    }
-  }
-  return null;
-}
-
-// --- The main entry point ----------------------------------------------------
+// --- The unified placement pass ----------------------------------------------
 
 export function planSchedule(input: {
   now: Date;
   tasks: PlannableTask[];
   busy: BusyInterval[];
-  // Study blocks the student has already moved by hand. Their time is expected
-  // to be part of `busy`; here they also reduce how many NEW sessions each task
-  // needs, so a moved block counts as one session instead of duplicating it.
   locked?: LockedSession[];
+  preferences?: Partial<PlacementPreferences>;
   config?: Config;
 }): PlannedBlock[] {
   const cfg = input.config ?? SCHEDULER_CONFIG;
+  const prefs = resolvePreferences(input.preferences, cfg);
   const { now } = input;
 
-  // Group the moved (locked) sessions by their task so each task can subtract
-  // the sessions it already has placed.
   const lockedByTask = new Map<string, LockedSession[]>();
   for (const l of input.locked ?? []) {
     const key = `${l.sourceKind}:${l.taskId}`;
-    const list = lockedByTask.get(key);
-    if (list) list.push(l);
-    else lockedByTask.set(key, [l]);
+    (lockedByTask.get(key) ?? lockedByTask.set(key, []).get(key)!).push(l);
   }
 
-  // Shared per-day workload tally (minutes), so the daily cap holds ACROSS tasks
-  // and already-placed exam prep — not just within one task. Seed it with the
-  // moved blocks the student has locked in, so they count toward each day's cap.
+  // Shared daily study-load ledger (LEVELING), seeded with the minutes of blocks
+  // the student already moved so those days count as partly full.
   const dayLoad = new Map<number, number>();
   for (const l of input.locked ?? []) {
     const key = dayKeyOf(l.start);
@@ -365,16 +352,12 @@ export function planSchedule(input: {
   // Horizon: HORIZON_DAYS out, stretched to the furthest deadline, capped.
   const cap = addDays(startOfDay(now), cfg.HORIZON_CAP_DAYS);
   const base = addDays(startOfDay(now), cfg.HORIZON_DAYS);
-  const furthest = input.tasks.reduce(
-    (m, t) => (t.deadline > m ? t.deadline : m),
-    base
-  );
+  const furthest = input.tasks.reduce((m, t) => (t.deadline > m ? t.deadline : m), base);
   const horizonEnd = new Date(Math.min(furthest.getTime(), cap.getTime()));
 
-  const free = buildFreeIntervals(now, horizonEnd, input.busy, cfg);
+  const free = buildFreeIntervals(now, horizonEnd, input.busy, prefs);
 
-  // Urgency order: earliest deadline first, then larger effort, then id — a total
-  // order so the plan is deterministic and urgent work gets first pick of slots.
+  // Urgency order: earliest deadline first, then larger effort, then id.
   const tasks = [...input.tasks].sort(
     (a, b) =>
       a.deadline.getTime() - b.deadline.getTime() ||
@@ -383,30 +366,74 @@ export function planSchedule(input: {
   );
 
   const out: PlannedBlock[] = [];
+
+  // Place ONE session of `minutes` for a task, scoring days across [firstDay,
+  // lastDay] and choosing the best (spread + leveling + quality). Books it against
+  // free + dayLoad. Returns the placed slot or null (couldn't fit under capacity).
+  const placeSession = (
+    minutes: number,
+    idealOffset: number,
+    firstDay: number,
+    lastDay: number,
+    deadline: Date
+  ): BusyInterval | null => {
+    let best: { day: Date; key: number; slot: { start: Date; end: Date; quality: number }; score: number } | null =
+      null;
+    for (let d = firstDay; d <= lastDay; d++) {
+      const day = offsetToDay(now, d);
+      const key = dayKeyOf(day);
+      const remaining = dayCapacity(day, prefs) - (dayLoad.get(key) ?? 0);
+      if (remaining < minutes) continue; // leveling: this day is full
+      const slot = bestSlotInDay(free, key, minutes, now, deadline, prefs, cfg);
+      if (!slot) continue;
+      const spread = -Math.abs(d - idealOffset);
+      const level = dayCapacity(day, prefs) > 0 ? remaining / dayCapacity(day, prefs) : 0;
+      const score =
+        cfg.PLACEMENT.WEIGHT_SPREAD * spread +
+        cfg.PLACEMENT.WEIGHT_LEVEL * level +
+        cfg.PLACEMENT.WEIGHT_QUALITY * slot.quality;
+      if (best === null || score > best.score + EPS) best = { day, key, slot, score };
+    }
+    if (!best) return null;
+    const placed = { start: best.slot.start, end: best.slot.end };
+    takeSpecificSlot(free, placed);
+    dayLoad.set(best.key, (dayLoad.get(best.key) ?? 0) + minutes);
+    return placed;
+  };
+
+  // Place a small MARKER (reserved / needs-input) near the deadline, in real free
+  // time, without counting it against capacity. Scans days deadline-first.
+  const placeMarker = (
+    minutes: number,
+    firstDay: number,
+    lastDay: number,
+    deadline: Date
+  ): BusyInterval | null => {
+    for (let d = lastDay; d >= firstDay; d--) {
+      const key = dayKeyOf(offsetToDay(now, d));
+      const slot = bestSlotInDay(free, key, minutes, now, deadline, prefs, cfg);
+      if (slot) {
+        const placed = { start: slot.start, end: slot.end };
+        takeSpecificSlot(free, placed);
+        return placed;
+      }
+    }
+    return null;
+  };
+
   for (const task of tasks) {
-    if (task.deadline <= now) continue; // nothing to do for a past deadline
+    if (task.deadline <= now) continue;
 
     const archetype = effectiveArchetype(task);
     const spacingSchedule = task.spacingSchedule ?? null;
     const lockedForTask = lockedByTask.get(`${task.kind}:${task.id}`) ?? [];
+    const lastDay = daysUntil(now, task.deadline);
 
+    // --- Unknown type → one needs-input placeholder near the deadline ---------
     if (task.needsInput || task.totalMinutes == null) {
-      // If the student already moved a block for this task, keep that (it's in
-      // `busy`/`locked`) and don't re-create the placeholder. Otherwise hold one
-      // small, clickable placeholder and ask what kind of task it is — but only
-      // INSIDE the lead window and under the daily cap, exactly like real work,
-      // so a far-future unknown task stays invisible until its window opens. Its
-      // real size is unknown, so the placeholder size sizes the window.
-      if (lockedForTask.length > 0) continue;
-      const slot = placeWithinLeadWindow(
-        free,
-        now,
-        task.deadline,
-        cfg.PLACEHOLDER_MINUTES,
-        cfg.PLACEHOLDER_MINUTES,
-        dayLoad,
-        cfg
-      );
+      if (lockedForTask.length > 0) continue; // already has a moved block
+      const firstDay = Math.max(0, lastDay - leadDaysFor(cfg.PLACEHOLDER_MINUTES, cfg));
+      const slot = placeSession(cfg.PLACEHOLDER_MINUTES, lastDay, firstDay, lastDay, task.deadline);
       if (slot) {
         out.push({
           sourceKind: task.kind,
@@ -418,27 +445,18 @@ export function planSchedule(input: {
           reason: "Tell me what kind of task this is and I'll schedule real time for it.",
           sessionIndex: 1,
           sessionCount: 1,
-          archetype: archetype,
-          spacingSchedule: spacingSchedule,
+          archetype,
+          spacingSchedule,
         });
       }
       continue;
     }
 
-    // Full session plan for the task. `count` is the label denominator ("of N")
-    // and stays fixed even when some sessions are already locked in by a move.
-    // Completion tasks are a SINGLE small block — never chunked (that's the whole
-    // point of the archetype: a 15-min submission is one block, not "2 of 2").
+    // --- Sessions + reconciliation of moved blocks ----------------------------
     const sessions =
-      archetype === "completion"
-        ? [task.totalMinutes]
-        : splitSessions(task.totalMinutes, cfg);
+      archetype === "completion" ? [task.totalMinutes] : splitSessions(task.totalMinutes, cfg);
     const count = sessions.length;
 
-    // Reconcile moved blocks: a locked session fills one of the N slots, so we
-    // only place the REMAINING slots. Match by session index where we have it,
-    // then fall back to the earliest still-open indices. This is what stops a
-    // move from turning an N-session task into N+1 blocks on the next re-plan.
     const takenIndices = new Set(
       lockedForTask
         .map((l) => l.sessionIndex)
@@ -447,71 +465,47 @@ export function planSchedule(input: {
     let openSlots = sessions
       .map((minutes, i) => ({ index: i + 1, minutes }))
       .filter((s) => !takenIndices.has(s.index));
-    // Locked blocks without a usable index still consume a slot each: drop that
-    // many from the front so the remaining count is exactly count − lockedCount.
     const untracked = lockedForTask.length - takenIndices.size;
     if (untracked > 0) openSlots = openSlots.slice(untracked);
 
-    const toPlaceMinutes = openSlots.map((s) => s.minutes);
-    // Route by ARCHETYPE, not kind: memorization (entered exams AND Canvas
-    // exams/quizzes) uses the spacing path; production and completion use the
-    // lead-window + daily-cap assignment path. `placeAssignment` enforces (and
-    // updates) the shared daily cap itself; the spacing path is left untouched,
-    // so we record ITS placed minutes afterward so later assignments still see
-    // those days filling up.
-    const isMemorization = archetype === "memorization";
-    const placed: BusyInterval[] = isMemorization
-      ? placeExam(free, now, task, toPlaceMinutes, cfg)
-      : placeAssignment(free, now, task, toPlaceMinutes, dayLoad, cfg);
-    if (isMemorization) {
-      for (const slot of placed) {
-        const key = dayKeyOf(slot.start);
-        dayLoad.set(key, (dayLoad.get(key) ?? 0) + slotMinutes(slot));
-      }
-    }
+    // Smoothing window: [deadline − leadDays, deadline]. Sessions get evenly
+    // spaced IDEAL days across it; the scorer pulls each toward its ideal day
+    // while leveling keeps any single day from overloading.
+    const total = sessions.reduce((a, b) => a + b, 0);
+    const firstDay = Math.max(0, lastDay - leadDaysFor(total, cfg));
+    const span = lastDay - firstDay;
+    const n = openSlots.length;
+    const idealFor = (j: number) =>
+      n <= 0 ? lastDay : clamp(firstDay + Math.floor(((j + 0.5) * (span + 1)) / n), firstDay, lastDay);
 
-    // The spacing path (placeExam) decides its own session COUNT from the
-    // days-until-date, which can differ from the chunk count in `openSlots`, so
-    // label memorization blocks by their own sequence; assignment/completion
-    // blocks keep the reconciled open-slot indices (for correct move labels).
-    const labelCount = isMemorization ? placed.length : count;
-    placed.forEach((slot, i) => {
-      const idx = isMemorization ? i + 1 : openSlots[i].index;
-      out.push({
-        sourceKind: task.kind,
-        taskId: task.id,
-        title: task.title,
-        start: slot.start,
-        end: slot.end,
-        state: "scheduled",
-        reason: reasonFor(task, idx, labelCount, slot.start),
-        sessionIndex: idx,
-        sessionCount: labelCount,
-        archetype: archetype,
-        spacingSchedule: spacingSchedule,
-      });
+    let placedCount = 0;
+    openSlots.forEach((s, j) => {
+      const slot = placeSession(s.minutes, idealFor(j), firstDay, lastDay, task.deadline);
+      if (slot) {
+        placedCount++;
+        out.push({
+          sourceKind: task.kind,
+          taskId: task.id,
+          title: task.title,
+          start: slot.start,
+          end: slot.end,
+          state: "scheduled",
+          reason: reasonFor(archetype, s.index, count, slot.start),
+          sessionIndex: s.index,
+          sessionCount: count,
+          archetype,
+          spacingSchedule,
+        });
+      }
     });
 
-    // Honest shortfall: if not everything fit (no free time, or the daily cap
-    // was reached) before the deadline, hold ONE reserved placeholder so the gap
-    // is visible rather than silently dropped or crammed past the cap. It obeys
-    // the SAME lead window (sized by the task's real total) and daily cap as real
-    // work; if even a reminder can't fit there, it's deferred to a future run
-    // rather than dumped on the earliest day.
-    if (placed.length < openSlots.length) {
-      const missing = openSlots
-        .slice(placed.length)
-        .reduce((a, b) => a + b.minutes, 0);
-      const firstUnplacedIndex = openSlots[placed.length].index;
-      const slot = placeWithinLeadWindow(
-        free,
-        now,
-        task.deadline,
-        task.totalMinutes,
-        cfg.MIN_CHUNK_MINUTES,
-        dayLoad,
-        cfg
-      );
+    // --- Honest shortfall: overflow → ONE reserved marker, never crammed ------
+    if (placedCount < openSlots.length) {
+      const missing = openSlots.slice(placedCount).reduce((a, b) => a + b.minutes, 0);
+      const firstUnplacedIndex = openSlots[placedCount].index;
+      const slot =
+        placeMarker(cfg.MIN_CHUNK_MINUTES, firstDay, lastDay, task.deadline) ??
+        placeMarker(cfg.MIN_CHUNK_MINUTES, 0, lastDay, task.deadline);
       if (slot) {
         out.push({
           sourceKind: task.kind,
@@ -520,11 +514,11 @@ export function planSchedule(input: {
           start: slot.start,
           end: slot.end,
           state: "reserved",
-          reason: `Not enough free time before the deadline for ~${missing} more min — held as a reminder.`,
+          reason: `Not enough capacity before the deadline for ~${missing} more min — held as a reminder.`,
           sessionIndex: firstUnplacedIndex,
           sessionCount: count,
-          archetype: archetype,
-          spacingSchedule: spacingSchedule,
+          archetype,
+          spacingSchedule,
         });
       }
     }
@@ -533,103 +527,13 @@ export function planSchedule(input: {
   return out.sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
-// Assignments: place sessions ONLY inside the lead window [due − leadDays, due]
-// (so far-future work doesn't flood the present), spread EARLIEST-first across
-// that window, one per day per pass. A day is skipped once it would exceed the
-// shared daily cap; sessions that never fit come back as a shortfall (→ the
-// caller reserves them) rather than being crammed past the cap.
-function placeAssignment(
-  free: BusyInterval[],
-  now: Date,
-  task: PlannableTask,
-  sessions: number[],
-  dayLoad: Map<number, number>,
-  cfg: Config
-): BusyInterval[] {
-  const placed: BusyInterval[] = [];
-  if (sessions.length === 0) return placed;
-
-  const lastDay = daysUntil(now, task.deadline);
-  const total = sessions.reduce((a, b) => a + b, 0);
-  const lead = leadDaysFor(total, cfg);
-  // Earliest offset we're allowed to start: leadDays before the due day, clamped
-  // to today. This is the START-OFFSET that keeps the calendar honest.
-  const firstDay = Math.max(0, lastDay - lead);
-
-  const queue = [...sessions];
-  let progress = true;
-  while (queue.length > 0 && progress) {
-    progress = false;
-    for (let offset = firstDay; offset <= lastDay && queue.length > 0; offset++) {
-      const { after, before } = dayBounds(now, task.deadline, offset);
-      if (after >= before) continue;
-
-      // Daily cap: don't schedule this session if it would push the day's total
-      // study minutes over the cap. The day just gets skipped; the session waits
-      // for another day in the window (or becomes a reserved shortfall).
-      const dayKey = dayKeyOf(addDays(startOfDay(now), offset));
-      const used = dayLoad.get(dayKey) ?? 0;
-      if (used + queue[0] > cfg.MAX_STUDY_MINUTES_PER_DAY) continue;
-
-      const slot = takeEarliestSlot(free, after, before, queue[0]);
-      if (slot) {
-        placed.push(slot);
-        dayLoad.set(dayKey, used + queue[0]);
-        queue.shift();
-        progress = true;
-      }
-    }
-  }
-  return placed;
-}
-
-// Exams: spacing effect — one session every `gap` days from today, earliest slot
-// each target day, all before the exam. Prefer starting earlier over later.
-function placeExam(
-  free: BusyInterval[],
-  now: Date,
-  task: PlannableTask,
-  sessions: number[],
-  cfg: Config
-): BusyInterval[] {
-  const total = daysUntil(now, task.deadline);
-  const gap = clamp(Math.round(cfg.SPACING_FRACTION * total), 1, Math.max(1, total));
-
-  // Target days: 0, gap, 2*gap, … strictly before the exam day.
-  const offsets: number[] = [];
-  for (let o = 0; o < Math.max(total, 1); o += gap) offsets.push(o);
-  if (offsets.length === 0) offsets.push(0);
-
-  // One session per target day; size each so the total is covered (capped).
-  const perDay = clamp(
-    Math.ceil(sessions.reduce((a, b) => a + b, 0) / offsets.length),
-    cfg.MIN_CHUNK_MINUTES,
-    cfg.CHUNK_CAP_MINUTES
-  );
-
-  const placed: BusyInterval[] = [];
-  for (const offset of offsets) {
-    const { after, before } = dayBounds(now, task.deadline, offset);
-    if (after >= before) continue;
-    const slot = takeEarliestSlot(free, after, before, perDay);
-    if (slot) placed.push(slot);
-  }
-  return placed;
-}
-
-function reasonFor(
-  task: PlannableTask,
-  index: number,
-  count: number,
-  start: Date
-): string {
-  const when = start.toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-  if (task.kind === "exam") {
+function reasonFor(archetype: Archetype | null, index: number, count: number, start: Date): string {
+  const when = start.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  if (archetype === "memorization") {
     return `Study session ${index} of ${count} for your test — spaced out to help it stick (${when}).`;
   }
-  return `Work session ${index} of ${count}, placed early so it's done before the due date (${when}).`;
+  if (archetype === "completion") {
+    return `Time to finish and submit this (${when}).`;
+  }
+  return `Work session ${index} of ${count}, spread out before the due date (${when}).`;
 }

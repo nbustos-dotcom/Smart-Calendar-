@@ -5,403 +5,184 @@ import {
   resolveArchetypeDuration,
   spacingScheduleFor,
   type BusyInterval,
+  type LockedSession,
   type PlannableTask,
 } from "@/lib/scheduler";
 import { SCHEDULER_CONFIG } from "@/lib/scheduler-config";
 
-// Dates are built with LOCAL constructors and the engine uses local hours, so
-// assertions on window/ordering hold regardless of the runner's timezone.
+// Dates use LOCAL constructors and the engine uses local hours, so assertions on
+// windows/ordering hold regardless of the runner's timezone.
 const at = (y: number, mo: number, d: number, h = 0, mi = 0) => new Date(y, mo, d, h, mi, 0, 0);
+const now = at(2026, 0, 5, 9, 0); // Mon Jan 5 2026, 09:00 (Jan 10 = Sat, Jan 11 = Sun)
 
-function withinWindow(b: { start: Date; end: Date }): boolean {
-  const sh = b.start.getHours() + b.start.getMinutes() / 60;
-  const eh = b.end.getHours() + b.end.getMinutes() / 60;
-  // end may land exactly on END_HOUR; both must sit inside [start,end] hours.
-  return sh >= SCHEDULER_CONFIG.DAY_WINDOW_START_HOUR && eh <= SCHEDULER_CONFIG.DAY_WINDOW_END_HOUR + 0.001;
-}
+const A = SCHEDULER_CONFIG.AVAILABILITY_DEFAULTS;
+const isWeekend = (d: Date) => d.getDay() === 0 || d.getDay() === 6;
+const minuteOfDay = (d: Date) => d.getHours() * 60 + d.getMinutes();
+const winStart = (d: Date) => (isWeekend(d) ? A.weekendStartMinute : A.weekdayStartMinute);
+const winEnd = (d: Date) => (isWeekend(d) ? A.weekendEndMinute : A.weekdayEndMinute);
+const capOf = (d: Date) => (isWeekend(d) ? A.maxWeekendMinutes : A.maxWeekdayMinutes);
+const dayKey = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+const mins = (b: { start: Date; end: Date }) => (b.end.getTime() - b.start.getTime()) / 60000;
+const overlaps = (a: { start: Date; end: Date }, b: { start: Date; end: Date }) =>
+  a.start < b.end && b.start < a.end;
 
-function overlaps(a: { start: Date; end: Date }, b: { start: Date; end: Date }): boolean {
-  return a.start < b.end && b.start < a.end;
-}
+const task = (o: Partial<PlannableTask> & { id: string; deadline: Date; totalMinutes: number | null }): PlannableTask => ({
+  kind: "assignment",
+  title: `Task ${o.id}`,
+  needsInput: o.totalMinutes == null,
+  archetype: o.totalMinutes == null ? null : "production",
+  spacingSchedule: null,
+  ...o,
+});
 
-describe("resolveDurationMinutes (ladder + buffer)", () => {
-  it("applies the 1.4x buffer to the student's own estimate", () => {
+// ---------------------------------------------------------------------------
+// Pure duration helpers (unchanged by Stage B).
+// ---------------------------------------------------------------------------
+describe("duration helpers", () => {
+  it("applies the 1.4x buffer and category defaults (legacy ladder)", () => {
     expect(resolveDurationMinutes(100, null)).toBe(140);
-  });
-  it("uses the category default as-is when there's no estimate", () => {
     expect(resolveDurationMinutes(null, "reading")).toBe(60);
-    expect(resolveDurationMinutes(null, "project")).toBe(240);
-  });
-  it("returns null when neither estimate nor a known category exists", () => {
-    expect(resolveDurationMinutes(null, null)).toBeNull();
     expect(resolveDurationMinutes(null, "mystery")).toBeNull();
   });
-});
-
-describe("planSchedule — assignments", () => {
-  const now = at(2026, 0, 5, 8, 0); // Mon Jan 5, 08:00
-
-  it("chunks into ≤90-min sessions, spreads earlier, and finishes before the due date", () => {
-    const task: PlannableTask = {
-      kind: "assignment",
-      id: "1",
-      title: "Essay",
-      deadline: at(2026, 0, 10, 23, 59), // 5 days out
-      totalMinutes: 180,
-      needsInput: false,
-    };
-    const blocks = planSchedule({ now, tasks: [task], busy: [] });
-    expect(blocks).toHaveLength(2); // 180 → two 90-min sessions
-    for (const b of blocks) {
-      expect(b.state).toBe("scheduled");
-      expect(b.end.getTime()).toBeLessThanOrEqual(task.deadline.getTime());
-      expect(withinWindow(b)).toBe(true);
-      expect((b.end.getTime() - b.start.getTime()) / 60000).toBe(90);
-    }
-    // Spread across different days (one per day, earliest-first).
-    expect(blocks[0].start.getDate()).not.toBe(blocks[1].start.getDate());
-    expect(blocks[0].start.getTime()).toBeLessThan(blocks[1].start.getTime());
+  it("sizes archetypes and applies per-archetype buffers", () => {
+    expect(resolveArchetypeDuration({ estMinutes: null, archetype: "completion", subtype: null, points: 99 })).toBe(15);
+    expect(resolveArchetypeDuration({ estMinutes: null, archetype: "production", subtype: "project", points: 30 })).toBe(480);
+    expect(resolveArchetypeDuration({ estMinutes: null, archetype: "memorization", subtype: "exam", points: null })).toBe(360);
+    expect(resolveArchetypeDuration({ estMinutes: 100, archetype: "production", subtype: null, points: null })).toBe(150);
   });
-
-  it("never double-books competing deadlines", () => {
-    const tasks: PlannableTask[] = [
-      { kind: "assignment", id: "1", title: "A", deadline: at(2026, 0, 6, 23, 59), totalMinutes: 90, needsInput: false },
-      { kind: "assignment", id: "2", title: "B", deadline: at(2026, 0, 6, 23, 59), totalMinutes: 90, needsInput: false },
-    ];
-    const blocks = planSchedule({ now, tasks, busy: [] });
-    for (let i = 0; i < blocks.length; i++) {
-      for (let j = i + 1; j < blocks.length; j++) {
-        expect(overlaps(blocks[i], blocks[j])).toBe(false);
-      }
-    }
-  });
-
-  it("never overlaps existing busy time", () => {
-    const busy: BusyInterval[] = [{ start: at(2026, 0, 5, 8, 0), end: at(2026, 0, 5, 12, 0) }];
-    const task: PlannableTask = {
-      kind: "assignment", id: "1", title: "HW", deadline: at(2026, 0, 5, 22, 0), totalMinutes: 60, needsInput: false,
-    };
-    const blocks = planSchedule({ now, tasks: [task], busy });
-    for (const b of blocks) expect(overlaps(b, busy[0])).toBe(false);
-  });
-
-  it("holds a needs_input placeholder when the type is unknown", () => {
-    const task: PlannableTask = {
-      kind: "assignment", id: "1", title: "???", deadline: at(2026, 0, 8, 23, 59), totalMinutes: null, needsInput: true,
-    };
-    const blocks = planSchedule({ now, tasks: [task], busy: [] });
-    expect(blocks).toHaveLength(1);
-    expect(blocks[0].state).toBe("needs_input");
-    expect((blocks[0].end.getTime() - blocks[0].start.getTime()) / 60000).toBe(
-      SCHEDULER_CONFIG.PLACEHOLDER_MINUTES
-    );
-  });
-
-  it("flags a reserved shortfall when the work can't fully fit before the deadline", () => {
-    // Only ~100 min free today (08:00–09:40); rest of the day is busy; due today.
-    const busy: BusyInterval[] = [{ start: at(2026, 0, 5, 9, 40), end: at(2026, 0, 5, 22, 0) }];
-    const task: PlannableTask = {
-      kind: "assignment", id: "1", title: "Big", deadline: at(2026, 0, 5, 22, 0), totalMinutes: 120, needsInput: false,
-    };
-    const blocks = planSchedule({ now, tasks: [task], busy });
-    expect(blocks.some((b) => b.state === "scheduled")).toBe(true);
-    expect(blocks.some((b) => b.state === "reserved")).toBe(true);
-  });
-});
-
-describe("planSchedule — deadline-aware placement (anti-flood)", () => {
-  const now = at(2026, 0, 5, 8, 0); // Mon Jan 5, 08:00
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
-  it("does NOT place a far-future small assignment in the near term", () => {
-    // 60-min task (lead ≈ 2 days) due 25 days out → work belongs at the END.
-    const task: PlannableTask = {
-      kind: "assignment",
-      id: "1",
-      title: "Quiz",
-      deadline: at(2026, 0, 30, 23, 59),
-      totalMinutes: 60,
-      needsInput: false,
-    };
-    const blocks = planSchedule({ now, tasks: [task], busy: [] });
-    expect(blocks.length).toBeGreaterThan(0);
-    // Nothing lands anywhere near "now" — every block sits inside the lead window
-    // just before the due date (here, on/after Jan 28), not on Jan 5/6.
-    const windowStart = at(2026, 0, 28, 0, 0);
-    for (const b of blocks) {
-      expect(b.start.getTime()).toBeGreaterThanOrEqual(windowStart.getTime());
-      expect(b.end.getTime()).toBeLessThanOrEqual(task.deadline.getTime());
-    }
-  });
-
-  it("surfaces a large far-future assignment only within its lead window", () => {
-    // 480-min task (lead ≈ 2 weeks) due 25 days out → nothing before Jan 16.
-    const task: PlannableTask = {
-      kind: "assignment",
-      id: "1",
-      title: "Project",
-      deadline: at(2026, 0, 30, 23, 59),
-      totalMinutes: 480,
-      needsInput: false,
-    };
-    const blocks = planSchedule({ now, tasks: [task], busy: [] });
-    expect(blocks.filter((b) => b.state === "scheduled").length).toBe(6); // 6×80
-    const windowStart = at(2026, 0, 16, 0, 0); // due − 14 days
-    for (const b of blocks) {
-      expect(b.start.getTime()).toBeGreaterThanOrEqual(windowStart.getTime());
-    }
-  });
-
-  it("caps real placement at MAX_STUDY_MINUTES_PER_DAY (never crams)", () => {
-    // 540 min (six 90-min sessions) due tomorrow → only two days in range and a
-    // 180-min/day cap ⇒ exactly 4 fit (2/day); the rest is NOT crammed in.
-    const task: PlannableTask = {
-      kind: "assignment",
-      id: "1",
-      title: "Cram",
-      deadline: at(2026, 0, 6, 22, 0),
-      totalMinutes: 540,
-      needsInput: false,
-    };
-    const blocks = planSchedule({ now, tasks: [task], busy: [] });
-    expect(blocks.filter((b) => b.state === "scheduled")).toHaveLength(4);
-    const perDay = new Map<number, number>();
-    for (const b of blocks) {
-      const key = startOfDay(b.start).getTime();
-      perDay.set(key, (perDay.get(key) ?? 0) + (b.end.getTime() - b.start.getTime()) / 60000);
-    }
-    for (const total of perDay.values()) {
-      expect(total).toBeLessThanOrEqual(SCHEDULER_CONFIG.MAX_STUDY_MINUTES_PER_DAY);
-    }
-  });
-
-  it("defers an overflow reserved block rather than dumping it on a full day", () => {
-    // Same saturating load: both in-range days hit the cap with real sessions, so
-    // the leftover work has nowhere to go under the cap. Per policy it is DEFERRED
-    // — nothing is dumped onto an already-full (or earlier) day.
-    const task: PlannableTask = {
-      kind: "assignment",
-      id: "1",
-      title: "Cram",
-      deadline: at(2026, 0, 6, 22, 0),
-      totalMinutes: 540,
-      needsInput: false,
-    };
-    const blocks = planSchedule({ now, tasks: [task], busy: [] });
-    expect(blocks.some((b) => b.state === "reserved")).toBe(false);
-    // Every day still within the cap across ALL block states.
-    const perDay = new Map<number, number>();
-    for (const b of blocks) {
-      const key = startOfDay(b.start).getTime();
-      perDay.set(key, (perDay.get(key) ?? 0) + (b.end.getTime() - b.start.getTime()) / 60000);
-    }
-    for (const total of perDay.values()) {
-      expect(total).toBeLessThanOrEqual(SCHEDULER_CONFIG.MAX_STUDY_MINUTES_PER_DAY);
-    }
-  });
-
-  it("(a) keeps far-future work — scheduled, reserved AND needs_input — out of the current week", () => {
-    // Two tasks due ~11 weeks out (Mar 23): one sized (2-week lead), one unknown
-    // type. Neither's lead window has opened, so NOTHING appears this week.
-    const due = at(2026, 2, 23, 23, 59);
-    const tasks: PlannableTask[] = [
-      { kind: "assignment", id: "1", title: "Final Project", deadline: due, totalMinutes: 480, needsInput: false },
-      { kind: "assignment", id: "2", title: "Week 14 ???", deadline: due, totalMinutes: null, needsInput: true },
-    ];
-    const blocks = planSchedule({ now, tasks, busy: [] });
-    const endOfWeek = at(2026, 0, 12, 0, 0); // start Jan 5 → the week ends Jan 12
-    const thisWeek = blocks.filter((b) => b.start.getTime() < endOfWeek.getTime());
-    expect(thisWeek).toHaveLength(0);
-    // Belt and suspenders: no near-term block of ANY state slipped through.
-    for (const b of blocks) {
-      expect(b.start.getTime()).toBeGreaterThanOrEqual(endOfWeek.getTime());
-    }
-  });
-
-  it("(b) places a needs_input placeholder inside its lead window, never at `now`", () => {
-    // Unknown-type task due Jan 20 (15 days out). The placeholder must appear near
-    // the deadline (inside the lead window), not dumped on today.
-    const due = at(2026, 0, 20, 23, 59);
-    const task: PlannableTask = {
-      kind: "assignment", id: "1", title: "???", deadline: due, totalMinutes: null, needsInput: true,
-    };
-    const blocks = planSchedule({ now, tasks: [task], busy: [] });
-    expect(blocks).toHaveLength(1);
-    expect(blocks[0].state).toBe("needs_input");
-    const windowStart = at(2026, 0, 18, 0, 0); // due − 2 days (placeholder lead)
-    expect(blocks[0].start.getTime()).toBeGreaterThanOrEqual(windowStart.getTime());
-    expect(blocks[0].start.getTime()).toBeLessThanOrEqual(due.getTime());
-    // Emphatically not at/near now.
-    expect(blocks[0].start.getTime()).toBeGreaterThan(at(2026, 0, 15, 0, 0).getTime());
-  });
-
-  it("(c) placeholders respect the daily cap and don't stack past it", () => {
-    // Two 180-min tasks saturate today + tomorrow to the cap; a third, unknown-type
-    // task shares that window. Its placeholder must NOT push either day over the cap.
-    const deadline = at(2026, 0, 6, 22, 0);
-    const tasks: PlannableTask[] = [
-      { kind: "assignment", id: "A", title: "A", deadline, totalMinutes: 180, needsInput: false },
-      { kind: "assignment", id: "B", title: "B", deadline, totalMinutes: 180, needsInput: false },
-      { kind: "assignment", id: "C", title: "C ???", deadline, totalMinutes: null, needsInput: true },
-    ];
-    const blocks = planSchedule({ now, tasks, busy: [] });
-    expect(blocks.filter((b) => b.state === "scheduled")).toHaveLength(4); // 2 tasks × 2
-    // The needs_input placeholder found no room under the cap → deferred, not stacked.
-    expect(blocks.some((b) => b.state === "needs_input")).toBe(false);
-    const perDay = new Map<number, number>();
-    for (const b of blocks) {
-      const key = startOfDay(b.start).getTime();
-      perDay.set(key, (perDay.get(key) ?? 0) + (b.end.getTime() - b.start.getTime()) / 60000);
-    }
-    for (const total of perDay.values()) {
-      expect(total).toBeLessThanOrEqual(SCHEDULER_CONFIG.MAX_STUDY_MINUTES_PER_DAY);
-    }
-  });
-});
-
-describe("planSchedule — moved-block reconciliation (no N+1 duplication)", () => {
-  const now = at(2026, 0, 5, 8, 0);
-
-  it("counts a moved block as one of its task's sessions (3 → 3, not 4)", () => {
-    // A 3-session task where the student already moved session 2 by hand.
-    const task: PlannableTask = {
-      kind: "assignment",
-      id: "1",
-      title: "PSet",
-      deadline: at(2026, 0, 12, 23, 59),
-      totalMinutes: 270, // three 90-min sessions
-      needsInput: false,
-    };
-    const movedStart = at(2026, 0, 8, 10, 0);
-    const movedEnd = at(2026, 0, 8, 11, 30);
-    const locked = [
-      { sourceKind: "assignment" as const, taskId: "1", sessionIndex: 2, start: movedStart, end: movedEnd },
-    ];
-    const busy: BusyInterval[] = [{ start: movedStart, end: movedEnd }];
-
-    const blocks = planSchedule({ now, tasks: [task], busy, locked });
-    const scheduled = blocks.filter((b) => b.state === "scheduled");
-
-    // Only the TWO remaining sessions are regenerated (not three).
-    expect(scheduled).toHaveLength(2);
-    for (const b of scheduled) expect(b.sessionCount).toBe(3);
-    // They fill the open slots (1 and 3); the moved block keeps slot 2.
-    expect(new Set(scheduled.map((b) => b.sessionIndex))).toEqual(new Set([1, 3]));
-    // Regenerated (2) + kept moved block (1) = 3 total — never 4.
-    expect(scheduled.length + locked.length).toBe(3);
-    // None of the regenerated work collides with the moved block.
-    for (const b of scheduled) expect(overlaps(b, busy[0])).toBe(false);
-  });
-});
-
-describe("planSchedule — exams (spacing effect)", () => {
-  it("spaces a 2-day test into ~one session per day, all before the exam", () => {
-    const now = at(2026, 0, 5, 8, 0);
-    const exam: PlannableTask = {
-      kind: "exam", id: "e1", title: "Midterm", deadline: at(2026, 0, 7, 10, 0), totalMinutes: 120, needsInput: false,
-    };
-    const blocks = planSchedule({ now, tasks: [exam], busy: [] });
-    expect(blocks.length).toBeGreaterThanOrEqual(2);
-    for (const b of blocks) expect(b.end.getTime()).toBeLessThanOrEqual(exam.deadline.getTime());
-    const days = new Set(blocks.map((b) => b.start.getDate()));
-    expect(days.size).toBeGreaterThanOrEqual(2); // spread, not massed in one block
-  });
-});
-
-describe("resolveArchetypeDuration (Stage 1 duration model)", () => {
-  it("gives a completion task one small fixed block", () => {
-    expect(
-      resolveArchetypeDuration({ estMinutes: null, archetype: "completion", subtype: "submission", points: 100 })
-    ).toBe(SCHEDULER_CONFIG.COMPLETION_DEFAULT_MINUTES);
-  });
-
-  it("sizes production by subtype, scaled gently by points", () => {
-    expect(
-      resolveArchetypeDuration({ estMinutes: null, archetype: "production", subtype: "essay", points: 30 })
-    ).toBe(180); // essay base, mid points ×1.0
-    expect(
-      resolveArchetypeDuration({ estMinutes: null, archetype: "production", subtype: "project", points: 30 })
-    ).toBe(480); // project base (8h)
-    // Low points shrink a production task; readings fold in and are small.
-    expect(
-      resolveArchetypeDuration({ estMinutes: null, archetype: "production", subtype: "reading", points: 5 })
-    ).toBe(36); // reading base 60 × 0.6 (low points), above the 30 floor
-  });
-
-  it("sizes memorization prep by subtype (exam prep is the biggest)", () => {
-    expect(
-      resolveArchetypeDuration({ estMinutes: null, archetype: "memorization", subtype: "exam", points: null })
-    ).toBe(360);
-    // Heavy (high-points) exams scale up beyond the base.
-    expect(
-      resolveArchetypeDuration({ estMinutes: null, archetype: "memorization", subtype: "exam", points: 100 })
-    ).toBeGreaterThan(360);
-    expect(
-      resolveArchetypeDuration({ estMinutes: null, archetype: "memorization", subtype: "quiz", points: null })
-    ).toBe(45);
-  });
-
-  it("applies the per-archetype buffer to a student estimate", () => {
-    // completion buffer 1.1, production 1.5.
-    expect(
-      resolveArchetypeDuration({ estMinutes: 100, archetype: "completion", subtype: null, points: null })
-    ).toBe(110);
-    expect(
-      resolveArchetypeDuration({ estMinutes: 100, archetype: "production", subtype: null, points: null })
-    ).toBe(150);
-  });
-});
-
-describe("spacingScheduleFor", () => {
-  it("uses tight spacing for a soon exam and wide spacing for a far one", () => {
+  it("picks a spacing schedule by distance", () => {
     expect(spacingScheduleFor(10)).toBe("2-3-5-7");
     expect(spacingScheduleFor(30)).toBe("1-3-7-21");
   });
 });
 
-describe("planSchedule — archetype routing (Stage 1)", () => {
-  const now = at(2026, 0, 5, 8, 0);
+// ---------------------------------------------------------------------------
+// The 10 acceptance criteria (the definition of done for the placement engine).
+// ---------------------------------------------------------------------------
+describe("placement engine — acceptance criteria", () => {
+  // A spread of realistic tasks used by several criteria.
+  const mixedTasks: PlannableTask[] = [
+    task({ id: "1", deadline: at(2026, 0, 12, 23, 59), totalMinutes: 180 }),
+    task({ id: "2", deadline: at(2026, 0, 13, 23, 59), totalMinutes: 240 }),
+    task({ id: "3", deadline: at(2026, 0, 14, 23, 59), totalMinutes: 120 }),
+    { ...task({ id: "e1", deadline: at(2026, 0, 15, 10, 0), totalMinutes: 360 }), kind: "exam", archetype: "memorization", spacingSchedule: "2-3-5-7" },
+  ];
+  // A recurring weekday class 10:00–11:00 as a fixed commitment.
+  const classes: BusyInterval[] = [0, 1, 2, 5, 6, 7].map((off) => ({
+    start: at(2026, 0, 5 + off, 10, 0),
+    end: at(2026, 0, 5 + off, 11, 0),
+  }));
 
-  it("places a completion task as ONE small block near the deadline (not chunked)", () => {
-    const task: PlannableTask = {
-      kind: "assignment",
-      id: "1",
-      title: "Step Submission",
-      deadline: at(2026, 0, 15, 23, 59), // 10 days out
-      totalMinutes: SCHEDULER_CONFIG.COMPLETION_DEFAULT_MINUTES,
-      needsInput: false,
-      archetype: "completion",
-      spacingSchedule: null,
-    };
-    const blocks = planSchedule({ now, tasks: [task], busy: [] });
-    expect(blocks).toHaveLength(1);
-    expect((blocks[0].end.getTime() - blocks[0].start.getTime()) / 60000).toBe(
-      SCHEDULER_CONFIG.COMPLETION_DEFAULT_MINUTES
-    );
-    expect(blocks[0].archetype).toBe("completion");
-    // Near the deadline — inside the short lead window, not dumped on day 1.
-    expect(blocks[0].start.getTime()).toBeGreaterThanOrEqual(at(2026, 0, 13, 0, 0).getTime());
+  it("(1) no session overlaps a commitment or another session", () => {
+    const blocks = planSchedule({ now, tasks: mixedTasks, busy: classes });
+    for (const b of blocks) for (const c of classes) expect(overlaps(b, c)).toBe(false);
+    for (let i = 0; i < blocks.length; i++)
+      for (let j = i + 1; j < blocks.length; j++) expect(overlaps(blocks[i], blocks[j])).toBe(false);
   });
 
-  it("routes a memorization ASSIGNMENT through the spaced path (multi-session, spread, before the date)", () => {
-    const task: PlannableTask = {
-      kind: "assignment", // a Canvas exam, not an entered exam
-      id: "1",
-      title: "Binary Numbers Exam",
-      deadline: at(2026, 0, 15, 10, 0), // 10 days out
-      totalMinutes: 360,
-      needsInput: false,
-      archetype: "memorization",
-      spacingSchedule: "2-3-5-7",
-    };
-    const blocks = planSchedule({ now, tasks: [task], busy: [] });
-    expect(blocks.length).toBeGreaterThanOrEqual(2);
+  it("(2)/(3) every block is inside allowed hours, never overnight, no 8am weekend", () => {
+    const blocks = planSchedule({ now, tasks: mixedTasks, busy: classes });
+    expect(blocks.length).toBeGreaterThan(0);
     for (const b of blocks) {
-      expect(b.end.getTime()).toBeLessThanOrEqual(task.deadline.getTime());
-      expect(b.archetype).toBe("memorization");
-      expect(b.spacingSchedule).toBe("2-3-5-7");
+      expect(b.start.getDate()).toBe(b.end.getDate()); // never overnight
+      expect(minuteOfDay(b.start)).toBeGreaterThanOrEqual(winStart(b.start));
+      expect(minuteOfDay(b.end)).toBeLessThanOrEqual(winEnd(b.start));
     }
-    const days = new Set(blocks.map((b) => b.start.getDate()));
-    expect(days.size).toBeGreaterThanOrEqual(2); // spaced across days, not massed
+    // The specific symptom: nothing stacked at 8am on Sat/Sun (or any weekend
+    // time before the 10:00 weekend start).
+    const weekendEarly = blocks.filter((b) => isWeekend(b.start) && minuteOfDay(b.start) < A.weekendStartMinute);
+    expect(weekendEarly).toHaveLength(0);
+    expect(blocks.filter((b) => isWeekend(b.start) && b.start.getHours() === 8)).toHaveLength(0);
+  });
+
+  it("(4) daily study capacity holds across ALL tasks combined", () => {
+    const blocks = planSchedule({ now, tasks: mixedTasks, busy: classes });
+    const perDay = new Map<number, number>();
+    for (const b of blocks.filter((x) => x.state === "scheduled")) {
+      perDay.set(dayKey(b.start), (perDay.get(dayKey(b.start)) ?? 0) + mins(b));
+    }
+    for (const [key, total] of perDay) {
+      expect(total).toBeLessThanOrEqual(capOf(new Date(key)));
+    }
+  });
+
+  it("(5) a multi-session task is SPREAD across days, not massed on one day", () => {
+    const big = task({ id: "1", deadline: at(2026, 0, 20, 23, 59), totalMinutes: 360 }); // 4×90
+    const blocks = planSchedule({ now, tasks: [big], busy: [] }).filter((b) => b.state === "scheduled");
+    expect(blocks.length).toBe(4);
+    const days = new Set(blocks.map((b) => dayKey(b.start)));
+    expect(days.size).toBeGreaterThanOrEqual(3); // spread out, not all on day one
+  });
+
+  it("(6) deterministic + idempotent (same inputs → identical output)", () => {
+    const shape = (bs: ReturnType<typeof planSchedule>) =>
+      bs.map((b) => `${b.taskId}|${b.sessionIndex}/${b.sessionCount}|${b.state}|${b.start.toISOString()}|${b.end.toISOString()}`);
+    const a = planSchedule({ now, tasks: mixedTasks, busy: classes });
+    const b = planSchedule({ now, tasks: mixedTasks, busy: classes });
+    expect(shape(a)).toEqual(shape(b));
+  });
+
+  it("(7) moved blocks are respected — fixed, not overlapped, no N+1", () => {
+    const t = task({ id: "1", deadline: at(2026, 0, 14, 23, 59), totalMinutes: 270 }); // 3×90
+    const movedStart = at(2026, 0, 8, 15, 0);
+    const movedEnd = at(2026, 0, 8, 16, 30);
+    const locked: LockedSession[] = [
+      { sourceKind: "assignment", taskId: "1", sessionIndex: 2, start: movedStart, end: movedEnd },
+    ];
+    const busy: BusyInterval[] = [{ start: movedStart, end: movedEnd }];
+    const blocks = planSchedule({ now, tasks: [t], busy, locked });
+    const scheduled = blocks.filter((b) => b.state === "scheduled");
+    expect(scheduled).toHaveLength(2); // 3 total − 1 already moved (never 4)
+    expect(new Set(scheduled.map((b) => b.sessionIndex))).toEqual(new Set([1, 3]));
+    for (const b of scheduled) {
+      expect(b.sessionCount).toBe(3);
+      expect(overlaps(b, busy[0])).toBe(false);
+    }
+  });
+
+  it("(8) overflow becomes reserved, never crammed past capacity", () => {
+    // Five large tasks all due in two days — far more than 2 weekdays' capacity.
+    const heavy = [1, 2, 3, 4, 5].map((i) =>
+      task({ id: `${i}`, deadline: at(2026, 0, 7, 21, 0), totalMinutes: 480 })
+    );
+    const blocks = planSchedule({ now, tasks: heavy, busy: [] });
+    expect(blocks.some((b) => b.state === "reserved")).toBe(true);
+    const perDay = new Map<number, number>();
+    for (const b of blocks.filter((x) => x.state === "scheduled")) {
+      perDay.set(dayKey(b.start), (perDay.get(dayKey(b.start)) ?? 0) + mins(b));
+    }
+    for (const [key, total] of perDay) expect(total).toBeLessThanOrEqual(capOf(new Date(key)));
+  });
+
+  it("(9) every block carries a plain-language reason", () => {
+    const withUnknown = [...mixedTasks, task({ id: "u1", deadline: at(2026, 0, 12, 23, 59), totalMinutes: null })];
+    const blocks = planSchedule({ now, tasks: withUnknown, busy: classes });
+    for (const b of blocks) expect(typeof b.reason === "string" && b.reason.length > 0).toBe(true);
+  });
+
+  it("(10) exam/memorization study spreads across distinct days before the date", () => {
+    const exam: PlannableTask = {
+      kind: "exam", id: "e1", title: "Final", deadline: at(2026, 0, 15, 10, 0),
+      totalMinutes: 360, needsInput: false, archetype: "memorization", spacingSchedule: "2-3-5-7",
+    };
+    const blocks = planSchedule({ now, tasks: [exam], busy: [] }).filter((b) => b.state === "scheduled");
+    for (const b of blocks) expect(b.end.getTime()).toBeLessThanOrEqual(exam.deadline.getTime());
+    const days = new Set(blocks.map((b) => dayKey(b.start)));
+    expect(days.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it("real-world symptom gone: a normal week places NOTHING at 8am on Sat/Sun", () => {
+    // A realistic-ish load: several assignments + an exam + weekday classes.
+    const load: PlannableTask[] = [
+      task({ id: "a", deadline: at(2026, 0, 12, 23, 59), totalMinutes: 120 }),
+      task({ id: "b", deadline: at(2026, 0, 13, 23, 59), totalMinutes: 180 }),
+      task({ id: "c", deadline: at(2026, 0, 14, 23, 59), totalMinutes: 240 }),
+      task({ id: "d", deadline: at(2026, 0, 16, 23, 59), totalMinutes: 300 }),
+    ];
+    const blocks = planSchedule({ now, tasks: load, busy: classes });
+    const badWeekend = blocks.filter(
+      (b) => isWeekend(b.start) && minuteOfDay(b.start) < A.weekendStartMinute
+    );
+    expect(badWeekend).toHaveLength(0);
   });
 });

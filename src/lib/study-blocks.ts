@@ -211,6 +211,7 @@ export async function runPlanner(): Promise<{
     { data: userEventOverrideRows },
     { data: movedBlockRows },
     googleEvents,
+    { data: prefRow },
   ] = await Promise.all([
     supabase
       .from("assignments")
@@ -239,6 +240,13 @@ export async function runPlanner(): Promise<{
       )
       .eq("moved_by_user", true),
     getGoogleCalendarEvents(),
+    // Stage B: the student's reasonable-hours model (null row → engine defaults).
+    supabase
+      .from("student_preferences")
+      .select(
+        "weekday_start_minute, weekday_end_minute, weekend_start_minute, weekend_end_minute, max_weekday_minutes, max_weekend_minutes, quality_bands"
+      )
+      .maybeSingle(),
   ]);
 
   // --- Build the domain model (Tasks + Commitments), then project it into the
@@ -273,12 +281,30 @@ export async function runPlanner(): Promise<{
   // sessions) so regen doesn't duplicate it.
   const locked = movedBlocksToLocked(movedBlocks);
 
+  // Reasonable-hours model: the student's saved preferences if any, else the
+  // engine's defaults. (No row → undefined → defaults.)
+  const pr = prefRow as Record<string, unknown> | null;
+  const preferences = pr
+    ? {
+        weekdayStartMinute: pr.weekday_start_minute as number,
+        weekdayEndMinute: pr.weekday_end_minute as number,
+        weekendStartMinute: pr.weekend_start_minute as number,
+        weekendEndMinute: pr.weekend_end_minute as number,
+        maxWeekdayMinutes: pr.max_weekday_minutes as number,
+        maxWeekendMinutes: pr.max_weekend_minutes as number,
+        qualityBands: Array.isArray(pr.quality_bands)
+          ? (pr.quality_bands as { startMin: number; endMin: number; weight: number }[])
+          : undefined,
+      }
+    : undefined;
+
   // --- Plan ------------------------------------------------------------------
   const planned = planSchedule({
     now,
     tasks: tasks.map(taskToPlannable),
     busy: commitmentsToBusy(commitments),
     locked,
+    preferences,
   });
 
   // --- Persist: replace auto blocks, keep the ones the student moved --------
