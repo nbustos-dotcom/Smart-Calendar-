@@ -41,12 +41,17 @@ export const SCHEDULER_CONFIG = {
   // inside a lead window [due − leadDays, due]; bigger tasks earn a longer lead.
   // Matched top-down against the task's total (already-buffered) minutes; first
   // tier whose maxMinutes covers the total wins. Tunable knob.
+  // These are how far back the SMOOTHING WINDOW may reach — NOT where work
+  // starts. A task's ideal is the deadline day, so a lone task still lands near
+  // its due date; the window only needs to be wide enough that a CLUSTER of work
+  // can fan back onto earlier days when the near-deadline days fill up (Stage B
+  // fix: "spread heavy clusters earlier / anti-cramming"). Hence generous leads.
   LEAD_DAYS: [
-    { maxMinutes: 60, leadDays: 2 }, // tiny (≤1h): ~2 days before it's due
-    { maxMinutes: 120, leadDays: 4 }, // small (≤2h): a few days
-    { maxMinutes: 240, leadDays: 7 }, // medium (≤4h): ~1 week
-    { maxMinutes: 480, leadDays: 14 }, // large (≤8h): ~2 weeks
-    { maxMinutes: Number.POSITIVE_INFINITY, leadDays: 21 }, // huge: ~3 weeks
+    { maxMinutes: 60, leadDays: 7 }, // tiny (≤1h): up to a week of room to fan back
+    { maxMinutes: 120, leadDays: 10 }, // small (≤2h)
+    { maxMinutes: 240, leadDays: 14 }, // medium (≤4h): ~2 weeks
+    { maxMinutes: 480, leadDays: 21 }, // large (≤8h): ~3 weeks
+    { maxMinutes: Number.POSITIVE_INFINITY, leadDays: 28 }, // huge: ~4 weeks
   ] as { maxMinutes: number; leadDays: number }[],
 
   // Honesty backstop (LEGACY — superseded in Stage B by per-day capacities in
@@ -72,26 +77,36 @@ export const SCHEDULER_CONFIG = {
     maxWeekendMinutes: 240, // daily study cap (weekend)
   },
 
-  // Time-of-day QUALITY: how good each part of the day is for studying. The
-  // engine prefers higher-quality time and only spills into lower quality under
-  // pressure. First band that covers a minute-of-day wins; bands must span the
-  // availability windows. Higher weight = better.
+  // Time-of-day QUALITY: how good each part of the day is for studying. WIDE and
+  // GENTLE (Stage B fix) — a broad afternoon plateau with usable morning and
+  // evening shoulders, instead of one narrow prime band, so blocks vary across
+  // the day instead of funneling into 15:00–21:00. The availability WINDOW (not
+  // this curve) enforces reasonable hours: nothing before 09:00 weekday / 10:00
+  // weekend, nothing after 22:00, never overnight — quality only ranks WITHIN it.
+  // First band covering a minute-of-day wins; bands span the full clock.
   QUALITY_BANDS: [
-    { startMin: 0, endMin: 600, weight: 0.3 }, // before 10:00 — poor
-    { startMin: 600, endMin: 900, weight: 0.7 }, // 10:00–15:00 — ok
-    { startMin: 900, endMin: 1260, weight: 1.0 }, // 15:00–21:00 — prime
-    { startMin: 1260, endMin: 1440, weight: 0.5 }, // after 21:00 — winding down
+    { startMin: 0, endMin: 540, weight: 0.15 }, // before 09:00 — mostly outside windows
+    { startMin: 540, endMin: 660, weight: 0.55 }, // 09:00–11:00 — usable morning
+    { startMin: 660, endMin: 840, weight: 0.8 }, // 11:00–14:00 — good
+    { startMin: 840, endMin: 1140, weight: 1.0 }, // 14:00–19:00 — prime (broad)
+    { startMin: 1140, endMin: 1320, weight: 0.7 }, // 19:00–22:00 — usable evening
+    { startMin: 1320, endMin: 1440, weight: 0.15 }, // after 22:00 — winding down
   ] as { startMin: number; endMin: number; weight: number }[],
 
   // Scoring weights for choosing a DAY for each session:
   //   score = SPREAD·(−|day − idealDay|) + LEVEL·(remaining/capacity) + QUALITY·q
-  // SPREAD dominates (smoothing: sessions gravitate to their evenly-spaced target
-  // day), LEVEL breaks ties toward emptier days (leveling), QUALITY nudges toward
-  // days that still have good hours. Within a day, the best-quality slot is chosen.
+  // LEVEL is the CROSS-TASK spreading pressure: it reads the shared day-load
+  // ledger, so days already populated by EARLIER tasks become less attractive to
+  // later ones — a real spreading force, not just the capacity hard-stop. It is
+  // weighted to out-pull SPREAD once a day is partly full, so a cluster of
+  // same-deadline work fans across days (and earlier) instead of piling on one.
+  // SPREAD still orders empty days by nearness to the ideal (deadline) day, so a
+  // lone task lands near its due date. QUALITY nudges toward good hours. Within a
+  // day, the best-quality free slot is chosen.
   PLACEMENT: {
     GRANULARITY_MINUTES: 30, // candidate-start step when scanning a day
-    WEIGHT_SPREAD: 10,
-    WEIGHT_LEVEL: 2,
+    WEIGHT_SPREAD: 2,
+    WEIGHT_LEVEL: 3,
     WEIGHT_QUALITY: 1,
   },
 

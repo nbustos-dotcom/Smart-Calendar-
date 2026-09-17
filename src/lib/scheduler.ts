@@ -5,21 +5,26 @@
 // study blocks. No DB, no network, no randomness, NO AI. Same inputs always
 // produce the same plan (unit-tested in tests/scheduler.test.ts).
 //
-// ONE unified placement pass replaces the old scattered greedy placers. For each
-// session it SCORES every candidate day against three things and places the
-// session in the best-scoring available slot:
+// ONE unified placement pass. Sessions from ALL tasks are placed against a
+// SHARED day-load ledger, so placement is workload-aware (not per-task in
+// isolation). For each session it SCORES every candidate day and takes the
+// best-scoring available slot:
 //
-//   score(day) = SPREAD·(−|day − idealDay|)      ← smoothing: spread a task's
-//                                                   sessions across its window
-//              + LEVEL·(remainingCapacity/cap)   ← leveling: balance daily load
-//                                                   across ALL tasks combined
+//   score(day) = SPREAD·(−|day − idealDay|)      ← order empty days by nearness
+//                                                   to the deadline (ideal) day
+//              + LEVEL·(remainingCapacity/cap)   ← CROSS-TASK spreading pressure:
+//                                                   days already filled by earlier
+//                                                   tasks repel later ones
 //              + QUALITY·(best time-of-day there) ← reasonable hours
 //
-// and within the chosen day it takes the best-QUALITY free sub-slot. Availability
-// comes from the student's weekday/weekend windows (never overnight); work that
-// can't fit under daily capacity before a deadline becomes a `reserved` block
-// (honest), never crammed and never dropped. Moved blocks stay fixed (they are
-// in `busy` and counted as their task's sessions), so regen is non-destructive.
+// LEVEL out-pulls SPREAD once a day is partly full, so a CLUSTER of same-deadline
+// work fans across days — and reaches back onto earlier days when the days right
+// before the deadline fill (anti-cramming). Within the chosen day it takes the
+// best-QUALITY free sub-slot; the quality curve is broad, so times vary across
+// the day. Availability comes from weekday/weekend windows (never overnight);
+// work that can't fit under daily capacity before a deadline becomes a `reserved`
+// block (honest), never crammed and never dropped. Moved blocks stay fixed (in
+// `busy` and counted as their task's sessions), so regen is non-destructive.
 // ============================================================================
 import { addDays, startOfDay } from "@/lib/calendar";
 import { SCHEDULER_CONFIG, type Archetype } from "@/lib/scheduler-config";
@@ -265,9 +270,12 @@ function windowQuality(startMin: number, endMin: number, prefs: PlacementPrefere
   return sum / span;
 }
 
-// Best-quality free sub-slot of `minutes` on ONE day, within [lo, hi]. Scans
-// candidate starts at GRANULARITY steps and keeps the highest-quality one
-// (earliest wins ties). Returns null if nothing of that length fits that day.
+// Best free sub-slot of `minutes` on ONE day, within [lo, hi]. Ranks candidate
+// starts by (1) time-of-day QUALITY, then (2) least-globally-used HOUR, then (3)
+// earliest. The hour tie-break spreads sessions ACROSS the day over the whole
+// schedule — so within the broad prime plateau, successive sessions rotate
+// through the usable hours instead of all stacking at the earliest prime time.
+// `hourLoad` is the global start-hour histogram. Returns null if nothing fits.
 function bestSlotInDay(
   free: BusyInterval[],
   dayKey: number,
@@ -275,30 +283,40 @@ function bestSlotInDay(
   lo: Date,
   hi: Date,
   prefs: PlacementPreferences,
-  cfg: Config
+  cfg: Config,
+  hourLoad: Map<number, number>
 ): { start: Date; end: Date; quality: number } | null {
   const need = minutes * MS_PER_MIN;
   const step = cfg.PLACEMENT.GRANULARITY_MINUTES * MS_PER_MIN;
-  let best: { startMs: number; quality: number } | null = null;
+  type Cand = { startMs: number; quality: number; used: number };
+  const ref: { best: Cand | null } = { best: null };
+  const consider = (t: number) => {
+    const startMin = minuteOfDay(new Date(t));
+    const q = windowQuality(startMin, startMin + minutes, prefs);
+    const used = hourLoad.get(Math.floor(startMin / 60)) ?? 0;
+    const b = ref.best;
+    if (b === null || q > b.quality + EPS) {
+      ref.best = { startMs: t, quality: q, used };
+    } else if (Math.abs(q - b.quality) <= EPS) {
+      if (used < b.used || (used === b.used && t < b.startMs)) {
+        ref.best = { startMs: t, quality: q, used };
+      }
+    }
+  };
   for (const iv of free) {
     if (dayKeyOf(iv.start) !== dayKey) continue;
     const s0 = Math.max(iv.start.getTime(), lo.getTime());
     const e0 = Math.min(iv.end.getTime(), hi.getTime());
     if (e0 - s0 < need) continue;
     const lastStart = e0 - need;
-    for (let t = s0; t <= lastStart + EPS; t += step) {
-      const startMin = minuteOfDay(new Date(t));
-      const q = windowQuality(startMin, startMin + minutes, prefs);
-      if (best === null || q > best.quality + EPS) best = { startMs: t, quality: q };
-    }
+    for (let t = s0; t <= lastStart + EPS; t += step) consider(t);
     // Always consider the exact latest position too, so end-of-window prime time
     // is never missed by the coarse step.
-    const startMinLast = minuteOfDay(new Date(lastStart));
-    const qLast = windowQuality(startMinLast, startMinLast + minutes, prefs);
-    if (best === null || qLast > best.quality + EPS) best = { startMs: lastStart, quality: qLast };
+    consider(lastStart);
   }
-  if (best === null) return null;
-  return { start: new Date(best.startMs), end: new Date(best.startMs + need), quality: best.quality };
+  const chosen = ref.best;
+  if (!chosen) return null;
+  return { start: new Date(chosen.startMs), end: new Date(chosen.startMs + need), quality: chosen.quality };
 }
 
 // Carve a specific placed slot out of the free list (splice + leftovers).
@@ -344,9 +362,15 @@ export function planSchedule(input: {
   // Shared daily study-load ledger (LEVELING), seeded with the minutes of blocks
   // the student already moved so those days count as partly full.
   const dayLoad = new Map<number, number>();
+  // Global start-hour histogram (TIME-OF-DAY spreading): how many sessions start
+  // in each hour, so successive sessions rotate through the usable hours instead
+  // of all stacking at the earliest prime time. Seeded with moved blocks.
+  const hourLoad = new Map<number, number>();
   for (const l of input.locked ?? []) {
     const key = dayKeyOf(l.start);
     dayLoad.set(key, (dayLoad.get(key) ?? 0) + slotMinutes(l));
+    const h = l.start.getHours();
+    hourLoad.set(h, (hourLoad.get(h) ?? 0) + 1);
   }
 
   // Horizon: HORIZON_DAYS out, stretched to the furthest deadline, capped.
@@ -384,7 +408,7 @@ export function planSchedule(input: {
       const key = dayKeyOf(day);
       const remaining = dayCapacity(day, prefs) - (dayLoad.get(key) ?? 0);
       if (remaining < minutes) continue; // leveling: this day is full
-      const slot = bestSlotInDay(free, key, minutes, now, deadline, prefs, cfg);
+      const slot = bestSlotInDay(free, key, minutes, now, deadline, prefs, cfg, hourLoad);
       if (!slot) continue;
       const spread = -Math.abs(d - idealOffset);
       const level = dayCapacity(day, prefs) > 0 ? remaining / dayCapacity(day, prefs) : 0;
@@ -398,6 +422,8 @@ export function planSchedule(input: {
     const placed = { start: best.slot.start, end: best.slot.end };
     takeSpecificSlot(free, placed);
     dayLoad.set(best.key, (dayLoad.get(best.key) ?? 0) + minutes);
+    const h = placed.start.getHours();
+    hourLoad.set(h, (hourLoad.get(h) ?? 0) + 1); // feed the time-of-day rotation
     return placed;
   };
 
@@ -411,7 +437,7 @@ export function planSchedule(input: {
   ): BusyInterval | null => {
     for (let d = lastDay; d >= firstDay; d--) {
       const key = dayKeyOf(offsetToDay(now, d));
-      const slot = bestSlotInDay(free, key, minutes, now, deadline, prefs, cfg);
+      const slot = bestSlotInDay(free, key, minutes, now, deadline, prefs, cfg, hourLoad);
       if (slot) {
         const placed = { start: slot.start, end: slot.end };
         takeSpecificSlot(free, placed);
@@ -468,15 +494,18 @@ export function planSchedule(input: {
     const untracked = lockedForTask.length - takenIndices.size;
     if (untracked > 0) openSlots = openSlots.slice(untracked);
 
-    // Smoothing window: [deadline − leadDays, deadline]. Sessions get evenly
-    // spaced IDEAL days across it; the scorer pulls each toward its ideal day
-    // while leveling keeps any single day from overloading.
+    // Smoothing window: [deadline − leadDays, deadline]. Sessions FAN from the
+    // start of the window (session 1) to the deadline (last session); a SINGLE
+    // session targets the deadline day. This deadline-biased ideal (not a middle
+    // bias) means a lone task lands near its due date, while the cross-task LEVEL
+    // pressure in placeSession pushes a CLUSTER of same-deadline work onto
+    // earlier days as the near-deadline days fill — spreading, and reaching back.
     const total = sessions.reduce((a, b) => a + b, 0);
     const firstDay = Math.max(0, lastDay - leadDaysFor(total, cfg));
     const span = lastDay - firstDay;
     const n = openSlots.length;
     const idealFor = (j: number) =>
-      n <= 0 ? lastDay : clamp(firstDay + Math.floor(((j + 0.5) * (span + 1)) / n), firstDay, lastDay);
+      n <= 1 ? lastDay : clamp(firstDay + Math.round((j * span) / (n - 1)), firstDay, lastDay);
 
     let placedCount = 0;
     openSlots.forEach((s, j) => {

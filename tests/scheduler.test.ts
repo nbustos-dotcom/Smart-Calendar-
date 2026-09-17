@@ -171,6 +171,51 @@ describe("placement engine — acceptance criteria", () => {
     expect(days.size).toBeGreaterThanOrEqual(3);
   });
 
+  // --- Stage B fix: cross-task distribution, reach-back, time variety ---------
+  const cluster = (n: number, minutes: number, deadline: Date): PlannableTask[] =>
+    Array.from({ length: n }, (_, i) => task({ id: `c${i}`, deadline, totalMinutes: minutes }));
+  const offsetOf = (d: Date) => Math.round((dayKey(d) - dayKey(now)) / 86400000);
+
+  it("(a) a cluster of same-deadline tasks distributes across MULTIPLE days", () => {
+    const blocks = planSchedule({ now, tasks: cluster(12, 90, at(2026, 0, 12, 23, 59)), busy: [] }).filter(
+      (b) => b.state === "scheduled"
+    );
+    const days = new Set(blocks.map((b) => dayKey(b.start)));
+    expect(days.size).toBeGreaterThanOrEqual(4); // fanned out, not piled on one day
+    const perDay = new Map<number, number>();
+    for (const b of blocks) perDay.set(dayKey(b.start), (perDay.get(dayKey(b.start)) ?? 0) + 1);
+    expect(Math.max(...perDay.values())).toBeLessThan(blocks.length); // no single day holds them all
+  });
+
+  it("(b) when near-deadline days fill, work reaches back onto EARLIER days", () => {
+    const deadline = at(2026, 0, 11, 23, 59); // Sun Jan 11 = offset 6 from Mon Jan 5
+    const blocks = planSchedule({ now, tasks: cluster(14, 90, deadline), busy: [] }).filter(
+      (b) => b.state === "scheduled"
+    );
+    const minOffset = Math.min(...blocks.map((b) => offsetOf(b.start)));
+    expect(minOffset).toBeLessThanOrEqual(offsetOf(deadline) - 3); // reached ≥3 days earlier
+  });
+
+  it("(c) blocks are NOT all in one narrow time band — time-of-day varies", () => {
+    const blocks = planSchedule({ now, tasks: cluster(12, 90, at(2026, 0, 12, 23, 59)), busy: [] }).filter(
+      (b) => b.state === "scheduled"
+    );
+    const hours = new Set(blocks.map((b) => b.start.getHours()));
+    expect(hours.size).toBeGreaterThanOrEqual(3); // rotates through usable hours
+  });
+
+  it("(d) cluster stays deterministic and never overloads a day", () => {
+    const tasks = cluster(12, 90, at(2026, 0, 12, 23, 59));
+    const shape = (bs: ReturnType<typeof planSchedule>) =>
+      bs.map((b) => `${b.taskId}|${b.start.toISOString()}|${b.state}`);
+    expect(shape(planSchedule({ now, tasks, busy: [] }))).toEqual(shape(planSchedule({ now, tasks, busy: [] })));
+    const perDay = new Map<number, number>();
+    for (const b of planSchedule({ now, tasks, busy: [] }).filter((x) => x.state === "scheduled")) {
+      perDay.set(dayKey(b.start), (perDay.get(dayKey(b.start)) ?? 0) + mins(b));
+    }
+    for (const [key, total] of perDay) expect(total).toBeLessThanOrEqual(capOf(new Date(key)));
+  });
+
   it("real-world symptom gone: a normal week places NOTHING at 8am on Sat/Sun", () => {
     // A realistic-ish load: several assignments + an exam + weekday classes.
     const load: PlannableTask[] = [
