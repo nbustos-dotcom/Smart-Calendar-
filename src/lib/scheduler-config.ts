@@ -24,6 +24,12 @@ export const SCHEDULER_CONFIG = {
   CHUNK_CAP_MINUTES: 90,
   MIN_CHUNK_MINUTES: 30,
 
+  // Transition buffer around FIXED COMMITMENTS (classes, Google/class events, the
+  // student's own events) — walk/settle time. Treated as busy on BOTH sides of a
+  // commitment when computing free time, so no study block is placed within this
+  // many minutes before or after one. NOT applied around moved study blocks.
+  CLASS_BUFFER_MINUTES: 20,
+
   // Planning-fallacy buffer. Applied to the STUDENT'S OWN raw estimate only
   // (category defaults below are already padded, so they're used as-is). The
   // self-correcting version of this is a later phase.

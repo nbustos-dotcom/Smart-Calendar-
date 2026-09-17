@@ -29,7 +29,15 @@
 import { addDays, startOfDay } from "@/lib/calendar";
 import { SCHEDULER_CONFIG, type Archetype } from "@/lib/scheduler-config";
 
-export type BusyInterval = { start: Date; end: Date };
+export type BusyInterval = {
+  start: Date;
+  end: Date;
+  // When true, a transition buffer (CLASS_BUFFER_MINUTES) is treated as busy on
+  // BOTH sides of this interval in the free-time computation — walk/settle time
+  // around a fixed commitment. Set for classes / Google / the student's own
+  // events; NOT for moved study blocks. Defaults to false (no buffer).
+  buffer?: boolean;
+};
 
 export type PlannableTask = {
   kind: "assignment" | "exam";
@@ -379,7 +387,17 @@ export function planSchedule(input: {
   const furthest = input.tasks.reduce((m, t) => (t.deadline > m ? t.deadline : m), base);
   const horizonEnd = new Date(Math.min(furthest.getTime(), cap.getTime()));
 
-  const free = buildFreeIntervals(now, horizonEnd, input.busy, prefs);
+  // Transition buffer: grow every commitment interval (buffer: true) by
+  // CLASS_BUFFER_MINUTES on both sides BEFORE subtracting it from availability, so
+  // the buffered time is simply not free. Moved study blocks (buffer falsy) are
+  // left as-is. This flows through the unified engine naturally.
+  const bufferMs = cfg.CLASS_BUFFER_MINUTES * MS_PER_MIN;
+  const busy = input.busy.map((b) =>
+    b.buffer
+      ? { start: new Date(b.start.getTime() - bufferMs), end: new Date(b.end.getTime() + bufferMs) }
+      : b
+  );
+  const free = buildFreeIntervals(now, horizonEnd, busy, prefs);
 
   // Urgency order: earliest deadline first, then larger effort, then id.
   const tasks = [...input.tasks].sort(

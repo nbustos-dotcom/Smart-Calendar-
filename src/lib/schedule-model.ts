@@ -237,7 +237,14 @@ export function buildCommitments(input: {
 // exactly what planSchedule already consumes. Stage B replaces the engine.)
 
 export function commitmentsToBusy(commitments: Commitment[]): BusyInterval[] {
-  return commitments.map((c) => ({ start: c.start, end: c.end }));
+  // Fixed commitments (classes, Google, the student's own events) get a
+  // transition buffer around them in the engine's free-time computation; a moved
+  // study block does not (you can study right after finishing one).
+  return commitments.map((c) => ({
+    start: c.start,
+    end: c.end,
+    buffer: c.source !== "moved_study",
+  }));
 }
 
 export function taskToPlannable(task: Task): PlannableTask {

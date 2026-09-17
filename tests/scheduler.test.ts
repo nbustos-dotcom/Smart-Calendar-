@@ -95,6 +95,49 @@ describe("placement engine — acceptance criteria", () => {
     expect(blocks.filter((b) => isWeekend(b.start) && b.start.getHours() === 8)).toHaveLength(0);
   });
 
+  it("(buffer) no study block lands within CLASS_BUFFER_MINUTES of a commitment", () => {
+    const BUF = SCHEDULER_CONFIG.CLASS_BUFFER_MINUTES;
+    const classStart = at(2026, 0, 5, 14, 0);
+    const classEnd = at(2026, 0, 5, 15, 0);
+    // A commitment carries buffer: true; a moved study block would not.
+    const busy: BusyInterval[] = [{ start: classStart, end: classEnd, buffer: true }];
+    const tasks = [
+      task({ id: "1", deadline: at(2026, 0, 5, 22, 0), totalMinutes: 90 }),
+      task({ id: "2", deadline: at(2026, 0, 5, 22, 0), totalMinutes: 90 }),
+    ];
+    const blocks = planSchedule({ now, tasks, busy }).filter((b) => b.state === "scheduled");
+    expect(blocks.length).toBeGreaterThan(0);
+    // The forbidden zone is the class PLUS the buffer on both sides.
+    const zone = {
+      start: new Date(classStart.getTime() - BUF * 60000),
+      end: new Date(classEnd.getTime() + BUF * 60000),
+    };
+    for (const b of blocks) {
+      expect(overlaps(b, zone)).toBe(false); // never inside the class or its buffer
+      // Concretely: nothing starts before 15:20 that would spill into the buffer,
+      // and nothing ends after 13:40.
+      expect(b.start.getTime() >= zone.end.getTime() || b.end.getTime() <= zone.start.getTime()).toBe(true);
+    }
+  });
+
+  it("(buffer) a moved study block gets NO buffer (buffer:false)", () => {
+    // A moved study block is busy but not buffered — work may sit right against it.
+    const movedStart = at(2026, 0, 5, 14, 0);
+    const movedEnd = at(2026, 0, 5, 15, 0);
+    const busy: BusyInterval[] = [{ start: movedStart, end: movedEnd, buffer: false }];
+    const blocks = planSchedule({
+      now,
+      tasks: [task({ id: "1", deadline: at(2026, 0, 5, 22, 0), totalMinutes: 90 })],
+      busy,
+    }).filter((b) => b.state === "scheduled");
+    // No block overlaps the moved block itself, but a block IS allowed to touch it.
+    for (const b of blocks) expect(overlaps(b, { start: movedStart, end: movedEnd })).toBe(false);
+    const touches = blocks.some(
+      (b) => b.start.getTime() === movedEnd.getTime() || b.end.getTime() === movedStart.getTime()
+    );
+    expect(touches).toBe(true); // allowed to sit flush against a study block
+  });
+
   it("(4) daily study capacity holds across ALL tasks combined", () => {
     const blocks = planSchedule({ now, tasks: mixedTasks, busy: classes });
     const perDay = new Map<number, number>();
