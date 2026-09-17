@@ -997,7 +997,9 @@ function WeekView({
     const end = new Date(block.ends_at);
     const startMin = minutesOfDay(start);
     const endMin = Math.max(minutesOfDay(end), startMin + SNAP_MIN);
-    const dayIndex = Math.max(0, days.findIndex((d) => isSameDay(d, start)));
+    // Real column of this block's day. A block can only be dragged if it's
+    // rendered, i.e. its day is in the visible week, so this is always 0..6.
+    const dayIndex = days.findIndex((d) => isSameDay(d, start));
     const state: StudyDragState = {
       block,
       pointerStart: { x: e.clientX, y: e.clientY },
@@ -1031,7 +1033,12 @@ function WeekView({
     const end = new Date(block.ends_at);
     const startMin = minutesOfDay(start);
     return {
-      dayIndex: Math.max(0, days.findIndex((d) => isSameDay(d, start))),
+      // Real day column, or -1 when this block's day is NOT in the visible week.
+      // -1 never equals a rendered dayIndex (0..6), so out-of-week blocks are
+      // DROPPED by the `=== dayIndex` filter — the same effect as the isSameDay
+      // guard used by class events, assignments, exams, and the month view — with
+      // no fallback that would pile them onto the Sunday (column 0).
+      dayIndex: days.findIndex((d) => isSameDay(d, start)),
       startMin,
       endMin: Math.max(minutesOfDay(end), startMin + SNAP_MIN),
     };
