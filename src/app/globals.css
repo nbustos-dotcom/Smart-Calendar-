@@ -582,17 +582,19 @@ body,
    ========================================================================== */
 
 @keyframes study-border-shift {
-  from { background-position: center, 0% 50%; }
-  to   { background-position: center, 100% 50%; }
+  from { background-position: 0% 50%; }
+  to   { background-position: 100% 50%; }
 }
 
-.study-border,
-.study-border-needs {
-  border: 2px solid transparent;
-  background-size: 100% 100%, 300% 100%;
-  background-position: center, 0% 50%;
-  animation: study-border-shift 9s ease-in-out infinite alternate;
-}
+/* The block itself carries ONLY the solid theme-aware fill (set below) and NO
+   border. A real border would be drawn INSIDE the fixed pixel height under
+   box-sizing:border-box, stealing ~4px of interior and clipping the title/time
+   at the bottom. Instead the animated "system placed this" ring is an OVERLAY
+   (::after, masked to a 2px edge) and the left accent is another overlay
+   (::before) — neither costs interior height, so the content box keeps its full
+   size, matching a regular event's. */
+.study-border { background-color: var(--study-fill); }
+.study-border-needs { background-color: var(--study-fill-needs); }
 
 /* THEME-AWARE study-block palette. The concept — a distinct fill + vivid animated
    border + readable text + a thick left accent — adapts per theme instead of one
@@ -618,27 +620,38 @@ body,
   --study-accent-needs: #fcd34d;
 }
 
-/* Interior fill (padding-box layer) + the animated colour-shifting gradient on
-   the BORDER (border-box layer, the "system placed this" marker). */
-.study-border {
-  background-image:
-    linear-gradient(var(--study-fill), var(--study-fill)),
-    linear-gradient(90deg, #8b5cf6, #6366f1, #22d3ee, #6366f1, #8b5cf6);
-  background-clip: padding-box, border-box;
-  background-origin: padding-box, border-box;
+/* The animated colour-shifting "system placed this" ring, drawn as a 2px edge
+   that OVERLAYS the block (inset:0, then masked so only the border ring paints)
+   rather than a real border that would inset — and clip — the content. Its centre
+   is transparent, so the title/time show straight through it. */
+.study-border::after,
+.study-border-needs::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px; /* ring thickness — masked so only this edge shows */
+  background-size: 300% 100%;
+  background-position: 0% 50%;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  animation: study-border-shift 9s ease-in-out infinite alternate;
+}
+.study-border::after {
+  background-image: linear-gradient(90deg, #8b5cf6, #6366f1, #22d3ee, #6366f1, #8b5cf6);
+}
+.study-border-needs::after {
+  background-image: linear-gradient(90deg, #f59e0b, #8b5cf6, #22d3ee, #f59e0b);
 }
 
-.study-border-needs {
-  background-image:
-    linear-gradient(var(--study-fill-needs), var(--study-fill-needs)),
-    linear-gradient(90deg, #f59e0b, #8b5cf6, #22d3ee, #f59e0b);
-  background-clip: padding-box, border-box;
-  background-origin: padding-box, border-box;
-}
-
-/* Strongest accent on the LEFT edge: a thick vivid bar just inside the thin
-   animated border. A pseudo-element (not box-shadow) so it never clashes with the
-   element's Tailwind shadow. Decorative, so it ignores pointer/drag events. */
+/* Strongest accent on the LEFT edge: a thick vivid bar overlaid just inside the
+   ring. A pseudo-element (not box-shadow) so it never clashes with the element's
+   Tailwind shadow; z-index keeps it above the ::after ring. Decorative, so it
+   ignores pointer/drag events. */
 .study-border::before,
 .study-border-needs::before {
   content: "";
@@ -647,14 +660,15 @@ body,
   top: 0;
   bottom: 0;
   width: 3px;
+  z-index: 1;
   pointer-events: none;
 }
 .study-border::before { background: var(--study-accent); }
 .study-border-needs::before { background: var(--study-accent-needs); }
 
 @media (prefers-reduced-motion: reduce) {
-  .study-border,
-  .study-border-needs {
+  .study-border::after,
+  .study-border-needs::after {
     animation: none;
   }
 }

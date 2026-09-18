@@ -70,6 +70,8 @@ const GRID_PAD_TOP = 10; // top padding so the first hour label isn't clipped
 const MIN_BLOCK_PX = 26; // smallest a block can render, so its label still fits
 const STUDY_BLOCK_GAP_PX = 3; // visual breathing room trimmed off a study block's
 // bottom so stacked blocks read as distinct (does not change scheduled times)
+const STUDY_BLOCK_PADDING_Y = 4; // py-0.5 (2px top + 2px bottom) — the only interior
+// overhead now that the animated ring overlays instead of insetting a border
 const DEFAULT_EVENT_MIN = 60; // assume 1 hour when an event has no end time
 const DUE_BLOCK_MIN = 30; // a deadline is a moment; show it as a short block
 const SNAP_MIN = 15; // drag/resize snaps to a 15-minute grid
@@ -1471,25 +1473,32 @@ function WeekView({
                       const dragging = studyDrag?.block.id === b.id;
                       const needs = b.state === "needs_input";
                       const reserved = b.state === "reserved";
-                      // The block's ACTUAL rendered height after the breathing-room
-                      // trim — gate the second line on THIS, not the untrimmed h, so
-                      // the time never gets squeezed in with no room and clips.
+                      // The block's rendered height after the breathing-room trim.
+                      // The trim (STUDY_BLOCK_GAP_PX) is the ONLY thing that shrinks
+                      // the box vs a regular event — the animated ring now overlays
+                      // (globals.css) instead of insetting, so it costs no height.
                       const renderH = Math.max(MIN_BLOCK_PX, h - STUDY_BLOCK_GAP_PX);
+                      // Usable interior = box minus the vertical padding (py-0.5 =
+                      // 4px); there's no border overhead any more. Show the time only
+                      // when there's genuinely room for a title line + the time line
+                      // beneath it, so it never squeezes in and clips.
+                      const usableH = renderH - STUDY_BLOCK_PADDING_Y;
+                      const showTime = usableH >= 30; // ~two 11px/leading-tight lines
                       return (
                         <div
                           key={`sb-${b.id}`}
                           onPointerDown={(e) => startStudyDrag(e, b)}
                           onClick={(e) => e.stopPropagation()}
                           className={cn(
-                            // Theme-aware fill (--study-fill, set per theme in
-                            // globals.css) + the animated, slowly colour-shifting
-                            // gradient BORDER (study-border / study-border-needs) and
-                            // a thick vivid LEFT accent — the "the system placed this"
-                            // signal, disabled under prefers-reduced-motion. Text is
-                            // dark on the pale light-mode fill, light on the dark
-                            // dark/hyper fills. flex-col + a hair of bottom padding
-                            // keeps title + time off the bottom edge.
-                            "group absolute z-30 flex cursor-grab touch-none select-none flex-col overflow-hidden rounded-md px-1 pb-1 pt-0.5 pl-1.5 text-[11px] leading-tight shadow-sm",
+                            // Theme-aware solid fill (--study-fill, set per theme in
+                            // globals.css) + the animated colour-shifting ring and the
+                            // thick vivid LEFT accent — both OVERLAY pseudo-elements
+                            // (study-border / study-border-needs), so they never eat
+                            // interior height. Same box model as a regular event
+                            // (px-1 py-0.5, overflow-hidden) so content fits the same.
+                            // pl-1.5 clears the left accent; text is dark on the pale
+                            // light-mode fill, light on the dark dark/hyper fills.
+                            "group absolute z-30 cursor-grab touch-none select-none overflow-hidden rounded-md px-1 py-0.5 pl-1.5 text-[11px] leading-tight shadow-sm",
                             needs
                               ? "study-border-needs text-amber-950 dark:text-amber-50 hyper-focus:text-amber-50"
                               : "study-border text-violet-950 dark:text-violet-50 hyper-focus:text-violet-50",
@@ -1514,7 +1523,7 @@ function WeekView({
                               {studyLabel(b)}
                             </span>
                           </div>
-                          {renderH >= 46 && (
+                          {showTime && (
                             <div
                               className={cn(
                                 "truncate font-medium",
