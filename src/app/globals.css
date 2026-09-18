@@ -594,9 +594,13 @@ body,
   animation: study-border-shift 9s ease-in-out infinite alternate;
 }
 
+/* DARK interior fill + the animated colour-shifting gradient on the BORDER. The
+   first (padding-box) layer is now a solid dark tone so light text reads cleanly
+   over it in every theme; the second (border-box) layer is the shifting gradient
+   that marks the block as system-placed. */
 .study-border {
   background-image:
-    linear-gradient(oklch(0.55 0.2 290 / 0.16), oklch(0.55 0.2 290 / 0.16)),
+    linear-gradient(oklch(0.24 0.05 285), oklch(0.24 0.05 285)),
     linear-gradient(90deg, #8b5cf6, #6366f1, #22d3ee, #6366f1, #8b5cf6);
   background-clip: padding-box, border-box;
   background-origin: padding-box, border-box;
@@ -604,11 +608,27 @@ body,
 
 .study-border-needs {
   background-image:
-    linear-gradient(oklch(0.78 0.15 80 / 0.18), oklch(0.78 0.15 80 / 0.18)),
+    linear-gradient(oklch(0.26 0.05 70), oklch(0.26 0.05 70)),
     linear-gradient(90deg, #f59e0b, #8b5cf6, #22d3ee, #f59e0b);
   background-clip: padding-box, border-box;
   background-origin: padding-box, border-box;
 }
+
+/* Strongest accent on the LEFT edge: a thick vivid bar just inside the thin
+   animated border. A pseudo-element (not box-shadow) so it never clashes with the
+   element's Tailwind shadow. Decorative, so it ignores pointer/drag events. */
+.study-border::before,
+.study-border-needs::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  pointer-events: none;
+}
+.study-border::before { background: #a78bfa; }
+.study-border-needs::before { background: #fbbf24; }
 
 @media (prefers-reduced-motion: reduce) {
   .study-border,
