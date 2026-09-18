@@ -1471,19 +1471,28 @@ function WeekView({
                       const dragging = studyDrag?.block.id === b.id;
                       const needs = b.state === "needs_input";
                       const reserved = b.state === "reserved";
+                      // The block's ACTUAL rendered height after the breathing-room
+                      // trim — gate the second line on THIS, not the untrimmed h, so
+                      // the time never gets squeezed in with no room and clips.
+                      const renderH = Math.max(MIN_BLOCK_PX, h - STUDY_BLOCK_GAP_PX);
                       return (
                         <div
                           key={`sb-${b.id}`}
                           onPointerDown={(e) => startStudyDrag(e, b)}
                           onClick={(e) => e.stopPropagation()}
                           className={cn(
-                            // Dark interior fill + light text, with the animated,
-                            // slowly colour-shifting gradient BORDER (study-border /
-                            // study-border-needs, see globals.css) and a thick vivid
-                            // LEFT accent — the "the system placed this" signal,
-                            // disabled under prefers-reduced-motion.
-                            "group absolute z-30 cursor-grab touch-none select-none overflow-hidden rounded-md px-1 py-0.5 pl-1.5 text-[11px] leading-tight shadow-sm",
-                            needs ? "study-border-needs text-amber-50" : "study-border text-violet-50",
+                            // Theme-aware fill (--study-fill, set per theme in
+                            // globals.css) + the animated, slowly colour-shifting
+                            // gradient BORDER (study-border / study-border-needs) and
+                            // a thick vivid LEFT accent — the "the system placed this"
+                            // signal, disabled under prefers-reduced-motion. Text is
+                            // dark on the pale light-mode fill, light on the dark
+                            // dark/hyper fills. flex-col + a hair of bottom padding
+                            // keeps title + time off the bottom edge.
+                            "group absolute z-30 flex cursor-grab touch-none select-none flex-col overflow-hidden rounded-md px-1 pb-1 pt-0.5 pl-1.5 text-[11px] leading-tight shadow-sm",
+                            needs
+                              ? "study-border-needs text-amber-950 dark:text-amber-50 hyper-focus:text-amber-50"
+                              : "study-border text-violet-950 dark:text-violet-50 hyper-focus:text-violet-50",
                             reserved && "opacity-80",
                             dragging &&
                               "z-40 cursor-grabbing shadow-lg ring-2 ring-foreground/30"
@@ -1493,7 +1502,7 @@ function WeekView({
                           // (top) is unchanged; only the visual bottom is inset.
                           style={{
                             top,
-                            height: Math.max(MIN_BLOCK_PX, h - STUDY_BLOCK_GAP_PX),
+                            height: renderH,
                             left: "2px",
                             width: "calc(100% - 6px)",
                           }}
@@ -1505,11 +1514,13 @@ function WeekView({
                               {studyLabel(b)}
                             </span>
                           </div>
-                          {h > 34 && (
+                          {renderH >= 46 && (
                             <div
                               className={cn(
                                 "truncate font-medium",
-                                needs ? "text-amber-300" : "text-violet-300"
+                                needs
+                                  ? "text-amber-700 dark:text-amber-300 hyper-focus:text-amber-200"
+                                  : "text-violet-700 dark:text-violet-300 hyper-focus:text-violet-200"
                               )}
                             >
                               {formatMinutes(startMin)}–{formatMinutes(endMin)}
@@ -1783,12 +1794,13 @@ function StudyChip({
     <span
       onClick={needs ? () => onNeedsInput(block) : undefined}
       className={cn(
-        // Dark fill + bright thick left border + light text, matching the week
-        // view. Dark interior reads in light, dark, and hyper-focus themes.
+        // Theme-aware fill + bright thick left accent, matching the week view. The
+        // fill and accent come from the same per-theme --study-* tokens (globals.css),
+        // and the text flips dark-on-pale in light mode, light-on-dark otherwise.
         "flex items-center gap-0.5 truncate rounded border-l-4 px-1 py-0.5 text-[10px] leading-tight",
         needs
-          ? "cursor-pointer border-dashed border-amber-400 bg-[oklch(0.26_0.05_70)] text-amber-50"
-          : "border-violet-400 bg-[oklch(0.24_0.05_285)] text-violet-50",
+          ? "cursor-pointer border-dashed border-[var(--study-accent-needs)] bg-[var(--study-fill-needs)] text-amber-950 dark:text-amber-50 hyper-focus:text-amber-50"
+          : "border-[var(--study-accent)] bg-[var(--study-fill)] text-violet-950 dark:text-violet-50 hyper-focus:text-violet-50",
         block.state === "reserved" && "border-dashed opacity-80"
       )}
       title={block.reason ?? studyLabel(block)}

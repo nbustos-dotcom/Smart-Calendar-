@@ -594,13 +594,35 @@ body,
   animation: study-border-shift 9s ease-in-out infinite alternate;
 }
 
-/* DARK interior fill + the animated colour-shifting gradient on the BORDER. The
-   first (padding-box) layer is now a solid dark tone so light text reads cleanly
-   over it in every theme; the second (border-box) layer is the shifting gradient
-   that marks the block as system-placed. */
+/* THEME-AWARE study-block palette. The concept — a distinct fill + vivid animated
+   border + readable text + a thick left accent — adapts per theme instead of one
+   hardcoded dark palette: LIGHT = a pale-but-distinct fill with dark text;
+   DARK / HYPER-FOCUS = a dark fill with light text. The component picks matching
+   text colours with dark:/hyper-focus: variants. */
+:root {
+  --study-fill: oklch(0.95 0.03 290); /* light: pale violet */
+  --study-accent: #7c3aed; /* violet-600 — reads on the pale fill */
+  --study-fill-needs: oklch(0.95 0.05 85); /* light: pale amber */
+  --study-accent-needs: #d97706; /* amber-600 */
+}
+.dark {
+  --study-fill: oklch(0.24 0.05 285);
+  --study-accent: #a78bfa; /* violet-400 — pops on the dark fill */
+  --study-fill-needs: oklch(0.26 0.05 70);
+  --study-accent-needs: #fbbf24; /* amber-400 */
+}
+.hyper-focus {
+  --study-fill: oklch(0.3 0.06 285); /* lifted violet over the deep-navy page */
+  --study-accent: #c4b5fd;
+  --study-fill-needs: oklch(0.32 0.06 72);
+  --study-accent-needs: #fcd34d;
+}
+
+/* Interior fill (padding-box layer) + the animated colour-shifting gradient on
+   the BORDER (border-box layer, the "system placed this" marker). */
 .study-border {
   background-image:
-    linear-gradient(oklch(0.24 0.05 285), oklch(0.24 0.05 285)),
+    linear-gradient(var(--study-fill), var(--study-fill)),
     linear-gradient(90deg, #8b5cf6, #6366f1, #22d3ee, #6366f1, #8b5cf6);
   background-clip: padding-box, border-box;
   background-origin: padding-box, border-box;
@@ -608,7 +630,7 @@ body,
 
 .study-border-needs {
   background-image:
-    linear-gradient(oklch(0.26 0.05 70), oklch(0.26 0.05 70)),
+    linear-gradient(var(--study-fill-needs), var(--study-fill-needs)),
     linear-gradient(90deg, #f59e0b, #8b5cf6, #22d3ee, #f59e0b);
   background-clip: padding-box, border-box;
   background-origin: padding-box, border-box;
@@ -627,8 +649,8 @@ body,
   width: 3px;
   pointer-events: none;
 }
-.study-border::before { background: #a78bfa; }
-.study-border-needs::before { background: #fbbf24; }
+.study-border::before { background: var(--study-accent); }
+.study-border-needs::before { background: var(--study-accent-needs); }
 
 @media (prefers-reduced-motion: reduce) {
   .study-border,
